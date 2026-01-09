@@ -56,6 +56,7 @@ class UnoRoom extends Room {
         // Lobi Mesajları
         this.onMessage("start_game", (client) => {
             const p = this.state.players.get(client.sessionId);
+            // En az 2 kişi ve Host onayı gerekir
             if (p && p.isHost && this.state.players.size >= 2) {
                 this.lock(); // Odayı kilitle (Lobi listesinden kalkar)
                 this.setupGame();
@@ -79,6 +80,7 @@ class UnoRoom extends Room {
         
         // Boş koltuk bul
         let seat = this.seats.indexOf(null);
+        if (seat === -1) seat = 0; // Hata önleyici
         this.seats[seat] = client.sessionId;
         p.seatIndex = seat;
 
@@ -95,9 +97,10 @@ class UnoRoom extends Room {
         this.state.players.delete(client.sessionId);
         
         // Host devretme
-        if(p.isHost && this.state.players.size > 0) {
+        if(p && p.isHost && this.state.players.size > 0) {
             const nextId = this.state.players.keys().next().value;
             this.state.players.get(nextId).isHost = true;
+            this.broadcast("notification", "HOST DEĞİŞTİ.");
         }
     }
 
@@ -204,7 +207,7 @@ class UnoRoom extends Room {
         if (this.state.direction === 1) {
             this.turnIndex = (this.turnIndex + step) % len;
         } else {
-            this.turnIndex = (this.turnIndex - step + len * 10) % len;
+            this.turnIndex = (this.turnIndex - step + len * 10) % len; // Negatif modülo koruması
         }
         this.state.currentTurn = this.playerKeys[this.turnIndex];
     }
@@ -227,6 +230,9 @@ app.get('/healthz', (req, res) => res.send('OK'));
 
 const server = http.createServer(app);
 const gameServer = new Server({ server: server });
+
+// KRİTİK NOKTA: Buradaki isim "uno_room" olmalı!
 gameServer.define("uno_room", UnoRoom).enableRealtimeListing();
 
-server.listen(process.env.PORT || 3000, () => console.log("UNO Server Online"));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log("UNO Server Online"));
