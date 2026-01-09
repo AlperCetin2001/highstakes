@@ -1,4 +1,4 @@
-/* UNO PRO SERVER - v3.0 (Bar Edition) */
+/* UNO PRO SERVER - FINAL FIXED EDITION */
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -23,7 +23,7 @@ class GameRoom {
         this.turnIndex = 0;
         this.direction = 1;
         this.gameState = 'LOBBY'; 
-        this.settings = { stacking: settings.stacking || false };
+        this.settings = settings;
         this.pendingChallenge = null;
         this.unoCallers = new Set();
     }
@@ -85,47 +85,51 @@ class GameRoom {
 
 const rooms = {};
 
+// Oda Listesini Herkese Yayınla
+function broadcastRoomList() {
+    const list = Object.values(rooms)
+        .filter(r => r.gameState === 'LOBBY')
+        .map(r => ({ id: r.id, count: r.players.length, host: r.players[0]?.nickname }));
+    io.emit('roomList', list);
+}
+
 io.on('connection', (socket) => {
     
-    // --- ODA YÖNETİMİ ---
-    
-    socket.on('createRoom', ({ nickname, avatar, settings }) => {
+    // İlk bağlanan listeyi görsün
+    socket.emit('roomList', Object.values(rooms).filter(r => r.gameState === 'LOBBY').map(r => ({ id: r.id, count: r.players.length, host: r.players[0]?.nickname })));
+
+    socket.on('createRoom', ({ nickname, avatar }) => {
         const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const room = new GameRoom(roomId, settings);
+        const room = new GameRoom(roomId);
         room.players.push({ id: socket.id, nickname, avatar, hand: [], score: 0, isHost: true });
         rooms[roomId] = room;
         socket.join(roomId);
         
-        // Sadece odaya emit ediyoruz (Genel liste yok)
         io.to(roomId).emit('lobbyUpdate', { players: room.players, roomId, isHost: true });
+        broadcastRoomList();
     });
 
     socket.on('joinRoom', ({ roomId, nickname, avatar }) => {
         const room = rooms[roomId];
-        if (!room) return socket.emit('notification', { type: 'error', text: 'Böyle bir oda yok!' });
-        if (room.gameState !== 'LOBBY') return socket.emit('notification', { type: 'error', text: 'Oyun çoktan başladı!' });
+        if (!room) return socket.emit('notification', { type: 'error', text: 'Oda yok!' });
+        if (room.gameState !== 'LOBBY') return socket.emit('notification', { type: 'error', text: 'Oyun başlamış!' });
         
-        // Aynı kişi tekrar girmesin
         const existing = room.players.find(p => p.id === socket.id);
         if(!existing) {
             room.players.push({ id: socket.id, nickname, avatar, hand: [], score: 0, isHost: false });
             socket.join(roomId);
         }
         
-        io.to(roomId).emit('lobbyUpdate', { players: room.players, roomId, isHost: false });
+        // Host kim?
+        const isHost = room.players[0].id === socket.id;
+        io.to(roomId).emit('lobbyUpdate', { players: room.players, roomId, isHost });
+        broadcastRoomList();
     });
-
-    // --- OYUN BAŞLATMA ---
 
     socket.on('startGame', (roomId) => {
         const room = rooms[roomId];
         if (!room) return;
-        
-        // GÜVENLİK: 2 Kişi Kontrolü
-        if (room.players.length < 2) {
-            socket.emit('notification', { type: 'error', text: 'Oyunu başlatmak için en az 2 kişi gerekli!' });
-            return;
-        }
+        if (room.players.length < 2) return socket.emit('notification', { type: 'error', text: 'En az 2 kişi lazım!' });
         
         room.gameState = 'PLAYING';
         room.createDeck();
@@ -148,9 +152,8 @@ io.on('connection', (socket) => {
 
         io.to(roomId).emit('gameStarted');
         updateGameState(roomId);
+        broadcastRoomList(); // Oyun başlayınca listeden düşsün
     });
-
-    // --- OYUN İÇİ HAMLELER ---
 
     socket.on('playCard', ({ roomId, cardIndex, chosenColor }) => {
         const room = rooms[roomId];
@@ -166,21 +169,17 @@ io.on('connection', (socket) => {
         if (card.color === 'black') isValid = true;
         else if (card.color === previousColor || card.value === topCard.value) isValid = true;
 
-        if (!isValid) return socket.emit('notification', {type:'error', text:'Geçersiz Hamle!'});
+        if (!isValid) return socket.emit('notification', {type:'error', text:'Geçersiz Hamle'});
 
-        // WILD DRAW 4 BLÖF MEKANİĞİ
         if (card.value === 'draw4') {
             player.hand.splice(cardIndex, 1);
             card.displayColor = chosenColor;
             room.discardPile.push(card);
-
             room.gameState = 'CHALLENGE_WAITING';
             const victimIndex = getNextPlayerIndex(room);
-            const victim = room.players[victimIndex];
-            
             room.pendingChallenge = {
                 attackerId: player.id,
-                victimId: victim.id,
+                victimId: room.players[victimIndex].id,
                 cardPlayed: card,
                 prevColor: previousColor
             };
@@ -191,13 +190,12 @@ io.on('connection', (socket) => {
         player.hand.splice(cardIndex, 1);
         if (card.color === 'black') card.displayColor = chosenColor;
         room.discardPile.push(card);
-
         handleCardEffect(room, card);
     });
 
     socket.on('respondChallenge', ({ roomId, action }) => {
         const room = rooms[roomId];
-        if(!room || room.gameState !== 'CHALLENGE_WAITING') return;
+        if(!room) return;
         const { attackerId, victimId, prevColor } = room.pendingChallenge;
         if(socket.id !== victimId) return;
 
@@ -207,15 +205,11 @@ io.on('connection', (socket) => {
         if (action === 'accept') {
             victim.hand.push(...room.draw(4));
             room.turnIndex = getNextPlayerIndex(room);
-            io.to(roomId).emit('notification', {type:'info', text:`${victim.nickname} +4 kabul etti.`});
         } else {
             const hasColor = attacker.hand.some(c => c.color === prevColor);
-            if (hasColor) {
-                attacker.hand.push(...room.draw(4));
-                io.to(roomId).emit('notification', {type:'success', text:`BLÖF YAKALANDI! ${attacker.nickname} ceza yiyor.`});
-            } else {
+            if (hasColor) attacker.hand.push(...room.draw(4));
+            else {
                 victim.hand.push(...room.draw(6));
-                io.to(roomId).emit('notification', {type:'error', text:`MEYDAN OKUMA BAŞARISIZ! ${victim.nickname} +6 yiyor.`});
                 room.turnIndex = getNextPlayerIndex(room);
             }
         }
@@ -230,12 +224,7 @@ io.on('connection', (socket) => {
         if(!room) return;
         const player = room.players.find(p => p.id === socket.id);
         if (room.players.indexOf(player) !== room.turnIndex) return;
-
-        const drawn = room.draw(1)[0];
-        player.hand.push(drawn);
-        io.to(roomId).emit('notification', {type:'info', text:`${player.nickname} kart çekti.`});
-        
-        // Çektikten sonra oynanabilir mi kontrolü eklenebilir, şimdilik otomatik pas yok
+        player.hand.push(...room.draw(1));
         updateGameState(roomId);
     });
 
@@ -251,24 +240,18 @@ io.on('connection', (socket) => {
             if(p && p.hand.length <= 2) {
                 room.unoCallers.add(p.id);
                 io.to(roomId).emit('notification', {type:'success', text:`${p.nickname}: UNO!!!`});
-                io.to(roomId).emit('playSound', 'uno');
             }
         }
-    });
-
-    socket.on('disconnect', () => {
-        // Basitlik için odadan oyuncu silmiyoruz, ama bağlantı koparsa yeniden bağlanabilir.
     });
 
     function handleCardEffect(room, card) {
         const player = room.players[room.turnIndex];
         if (player.hand.length === 0) {
-            const points = room.calculateScore(player);
-            io.to(room.id).emit('gameOver', { winner: player, points });
-            room.gameState = 'SCORING';
+            io.to(room.id).emit('gameOver', { winner: player, points: room.calculateScore(player) });
+            delete rooms[room.id];
+            broadcastRoomList();
             return;
         }
-
         if (card.value === 'skip') advanceTurn(room);
         else if (card.value === 'reverse') {
             room.direction *= -1;
@@ -285,11 +268,9 @@ io.on('connection', (socket) => {
     function advanceTurn(room) {
         room.turnIndex = (room.turnIndex + room.direction + room.players.length) % room.players.length;
     }
-
     function getNextPlayerIndex(room) {
         return (room.turnIndex + room.direction + room.players.length) % room.players.length;
     }
-
     function updateGameState(roomId) {
         const room = rooms[roomId];
         room.players.forEach((p, i) => {
@@ -301,11 +282,7 @@ io.on('connection', (socket) => {
                 gameState: room.gameState,
                 challengeData: room.pendingChallenge,
                 players: room.players.map(pl => ({ 
-                    id: pl.id, 
-                    nickname: pl.nickname, 
-                    avatar: pl.avatar, 
-                    cardCount: pl.hand.length,
-                    isUno: room.unoCallers.has(pl.id)
+                    id: pl.id, nickname: pl.nickname, avatar: pl.avatar, cardCount: pl.hand.length, isUno: room.unoCallers.has(pl.id)
                 }))
             });
         });
@@ -313,4 +290,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log('UNO PRO SERVER READY'));
+server.listen(PORT, () => console.log('Fixed Server Ready'));
