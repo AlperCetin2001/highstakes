@@ -209,7 +209,7 @@ app.get('/healthz', (req, res) => res.send('OK'));
 const server = http.createServer(app);
 const gameServer = new Server({ server: server });
 
-// DÜZELTİLEN KISIM BURASI: "uno_room"
+// KRİTİK NOKTA: Buradaki isim "uno_room" olmalı!
 gameServer.define("uno_room", UnoRoom).enableRealtimeListing();
 
 const PORT = process.env.PORT || 3000;
