@@ -3,30 +3,25 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
-// 1. Express Uygulaması
 const app = express();
-app.use(cors()); // Tüm kaynaklara izin ver
+app.use(cors());
 
-// 2. HTTP Sunucusunu Express ile sarmala (Socket.io için gerekli)
 const server = http.createServer(app);
 
-// 3. Socket.io'yu başlat
 const io = new Server(server, {
     cors: {
-        origin: "*", // InfinityFree ve tüm yerlerden gelen isteklere izin ver
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
 
-// Render'da sunucunun çalıştığını anlamak için basit bir rota
 app.get('/', (req, res) => {
-    res.send('UNO Server Aktif! Socket.io bekliyor...');
+    res.send('UNO Server Aktif (Guncel Versiyon)!');
 });
 
-// --- OYUN MANTIĞI BAŞLANGICI ---
 const rooms = {};
 
-// Deste Oluşturma
+// --- OYUN FONKSİYONLARI ---
 function createDeck() {
     const colors = ['red', 'yellow', 'green', 'blue'];
     const values = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'skip', 'reverse', 'draw2'];
@@ -43,7 +38,6 @@ function createDeck() {
         deck.push({ color: 'black', value: 'wild', type: 'wild' });
         deck.push({ color: 'black', value: 'draw4', type: 'wild' });
     }
-
     return shuffle(deck);
 }
 
@@ -56,9 +50,12 @@ function shuffle(array) {
 }
 
 io.on('connection', (socket) => {
-    console.log('✅ Bir kullanıcı bağlandı:', socket.id);
+    console.log('✅ Bağlantı:', socket.id);
 
+    // ODAYA KATILMA
     socket.on('joinRoom', (roomId) => {
+        console.log(`➡️ ${socket.id} kullanıcısı ${roomId} odasına girmek istiyor.`);
+
         if (!rooms[roomId]) {
             rooms[roomId] = {
                 players: [],
@@ -72,33 +69,48 @@ io.on('connection', (socket) => {
 
         const room = rooms[roomId];
 
-        // Oyuncu zaten odada mı? (Yenileme durumu için)
-        const existingPlayer = room.players.find(p => p.id === socket.id);
-        if(!existingPlayer) {
-            if (room.gameStarted) {
-                socket.emit('error', 'Oyun başladı, giremezsin!');
-                return;
-            }
+        if (room.gameStarted) {
+            socket.emit('error', 'Bu oda şu an oyunda, giremezsin!');
+            return;
+        }
+
+        // Aynı kişi tekrar girmesin
+        const isAlreadyIn = room.players.find(p => p.id === socket.id);
+        if (!isAlreadyIn) {
             room.players.push({ id: socket.id, hand: [] });
             socket.join(roomId);
         }
 
+        // Odadaki herkese güncel sayıyı bildir
         io.to(roomId).emit('playerJoined', room.players.length);
         
-        // İlk giren yönetici olsun
+        // Odayı kuran (ilk kişi) yönetici olsun
         if (room.players[0].id === socket.id) {
             socket.emit('isHost', true);
         }
     });
 
+    // OYUNU BAŞLATMA
     socket.on('startGame', (roomId) => {
+        console.log(`▶️ Start isteği: Oda ${roomId}, İsteyen ${socket.id}`);
+        
         const room = rooms[roomId];
-        if (!room || room.players.length < 2) return;
+        if (!room) {
+            socket.emit('error', 'Oda bulunamadı!');
+            return;
+        }
+
+        // KRİTİK KONTROL: Tek başına başlatmaya çalışıyorsan hata ver
+        if (room.players.length < 2) {
+            console.log("❌ Yetersiz oyuncu sayısı.");
+            socket.emit('error', 'Oyunu başlatmak için EN AZ 2 OYUNCU gerekiyor! Yan sekmeden başka bir isimle girmeyi dene.');
+            return;
+        }
 
         room.gameStarted = true;
         room.deck = createDeck();
         
-        // Kart Dağıt
+        // Kartları Dağıt
         room.players.forEach(player => {
             player.hand = room.deck.splice(0, 7);
         });
@@ -111,35 +123,38 @@ io.on('connection', (socket) => {
         }
         room.discardPile.push(startCard);
 
+        console.log("✅ Oyun başlatıldı, durum gönderiliyor...");
         updateGameState(roomId);
     });
 
+    // KART OYNAMA
     socket.on('playCard', ({ roomId, cardIndex, chosenColor }) => {
         const room = rooms[roomId];
         if (!room) return;
 
         const player = room.players.find(p => p.id === socket.id);
-        const playerIndex = room.players.indexOf(player);
+        if (!player) return;
 
-        if (playerIndex !== room.turnIndex) return;
+        // Sıra kontrolü
+        const playerIndex = room.players.indexOf(player);
+        if (playerIndex !== room.turnIndex) {
+            socket.emit('error', 'Sıra sende değil!');
+            return;
+        }
 
         const card = player.hand[cardIndex];
         const topCard = room.discardPile[room.discardPile.length - 1];
 
-        // Kural Kontrolü
+        // Geçerlilik Kontrolü
         let isValid = false;
-        
-        // 1. Wild kart ise her zaman geçerli
+        const currentMsgColor = topCard.displayColor || topCard.color;
+
         if (card.color === 'black') isValid = true;
-        
-        // 2. Renk tutuyorsa (Eğer önceki kart Wild ise displayColor'a bakılır)
-        else if (card.color === (topCard.displayColor || topCard.color)) isValid = true;
-        
-        // 3. Sayı/Değer tutuyorsa
+        else if (card.color === currentMsgColor) isValid = true;
         else if (card.value === topCard.value) isValid = true;
 
         if (isValid) {
-            // Kartı oyna
+            // Kartı elden çıkar
             player.hand.splice(cardIndex, 1);
             
             if (card.color === 'black') {
@@ -153,29 +168,32 @@ io.on('connection', (socket) => {
                 advanceTurn(room);
             } else if (card.value === 'reverse') {
                 room.direction *= -1;
-                if(room.players.length === 2) advanceTurn(room); // 2 kişide reverse skip gibidir
+                if(room.players.length === 2) advanceTurn(room);
             } else if (card.value === 'draw2') {
                 let nextP = getNextPlayerIndex(room);
                 room.players[nextP].hand.push(...drawCards(room, 2));
-                advanceTurn(room); // +2 yiyen oynayamaz
+                advanceTurn(room);
             } else if (card.value === 'draw4') {
                 let nextP = getNextPlayerIndex(room);
                 room.players[nextP].hand.push(...drawCards(room, 4));
-                advanceTurn(room); // +4 yiyen oynayamaz
+                advanceTurn(room);
             }
 
-            // Kazanma Kontrolü
+            // Oyun Bitti mi?
             if (player.hand.length === 0) {
                 io.to(roomId).emit('gameOver', socket.id);
-                delete rooms[roomId]; // Odayı temizle
+                delete rooms[roomId];
                 return;
             }
 
             advanceTurn(room);
             updateGameState(roomId);
+        } else {
+            socket.emit('error', 'Bu kartı oynayamazsın!');
         }
     });
 
+    // KART ÇEKME
     socket.on('drawCard', (roomId) => {
         const room = rooms[roomId];
         if (!room) return;
@@ -184,27 +202,25 @@ io.on('connection', (socket) => {
         if (room.players.indexOf(player) !== room.turnIndex) return;
 
         player.hand.push(...drawCards(room, 1));
-        
-        // Kart çektikten sonra sıra geçer mi? (Basitlik için evet)
-        // advanceTurn(room); 
-        
         updateGameState(roomId);
     });
     
+    // PAS GEÇME
     socket.on('passTurn', (roomId) => {
          const room = rooms[roomId];
          if(!room) return;
+         const player = room.players.find(p => p.id === socket.id);
+         if (room.players.indexOf(player) !== room.turnIndex) return;
+         
          advanceTurn(room);
          updateGameState(roomId);
     });
 
     socket.on('disconnect', () => {
-        // Gelişmiş versiyonda oyuncu düşünce oda yönetimi yapılmalı
-        console.log('Kullanıcı ayrıldı:', socket.id);
+        console.log('Kullanıcı çıktı:', socket.id);
     });
 });
 
-// Yardımcı Fonksiyonlar
 function advanceTurn(room) {
     room.turnIndex = (room.turnIndex + room.direction + room.players.length) % room.players.length;
 }
@@ -222,7 +238,7 @@ function drawCards(room, count) {
                 room.deck = shuffle(room.discardPile);
                 room.discardPile = [top];
             } else {
-                break; // Kart kalmadı
+                break;
             }
         }
         drawn.push(room.deck.pop());
@@ -244,8 +260,7 @@ function updateGameState(roomId) {
     });
 }
 
-// 4. PORT Dinleme (BURASI ÇOK ÖNEMLİ)
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => { // app.listen DEĞİL!
-    console.log(`🚀 Server running on port ${PORT}`);
+server.listen(PORT, () => {
+    console.log(`🚀 Server ${PORT} portunda hazır.`);
 });
