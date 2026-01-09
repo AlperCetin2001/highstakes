@@ -4,9 +4,13 @@ const cors = require('cors');
 const { Server, Room } = require('colyseus');
 const { Schema, MapSchema, ArraySchema, type } = require('@colyseus/schema');
 
-// --- VERİ ŞEMALARI ---
+// --- VERİ MODELİ (SCHEMA) ---
 class Card extends Schema {
-    constructor(c, v) { super(); this.color = c; this.value = v; }
+    constructor(color, value) {
+        super();
+        this.color = color;
+        this.value = value;
+    }
 }
 type("string")(Card.prototype, "color");
 type("string")(Card.prototype, "value");
@@ -16,183 +20,203 @@ class Player extends Schema {
         super();
         this.hand = new ArraySchema();
         this.name = "Unknown";
-        this.seat = -1;
         this.isHost = false;
-        this.isDead = false;
-        this.avatarColor = "#ffffff";
+        this.seatIndex = -1; // 0-3
+        this.ready = false;
     }
 }
 type([Card])(Player.prototype, "hand");
 type("string")(Player.prototype, "name");
-type("number")(Player.prototype, "seat");
 type("boolean")(Player.prototype, "isHost");
-type("boolean")(Player.prototype, "isDead");
-type("string")(Player.prototype, "avatarColor");
+type("number")(Player.prototype, "seatIndex");
 
 class GameState extends Schema {
     constructor() {
         super();
         this.players = new MapSchema();
         this.currentTurn = "";
-        this.gameStatus = "LOBBY";
-        this.hostId = "";
+        this.direction = 1; // 1: Saat yönü, -1: Ters
+        this.gameStatus = "LOBBY"; 
         this.topCard = new Card("black", "wild");
-        this.chamber = 0; // 0-5
+        this.drawStack = 0; // Biriken cezalar (+2, +4)
     }
 }
 type({ map: Player })(GameState.prototype, "players");
 type("string")(GameState.prototype, "currentTurn");
 type("string")(GameState.prototype, "gameStatus");
-type("string")(GameState.prototype, "hostId");
 type(Card)(GameState.prototype, "topCard");
-type("number")(GameState.prototype, "chamber");
 
 // --- ODA MANTIĞI ---
-class CyberRoom extends Room {
+class UnoRoom extends Room {
     onCreate(options) {
         this.maxClients = 4;
         this.setState(new GameState());
         this.seats = [null, null, null, null]; // Koltuk takibi
 
+        // Lobi Mesajları
         this.onMessage("start_game", (client) => {
-            if (client.sessionId === this.state.hostId && this.state.players.size >= 2) {
-                this.lock();
+            const p = this.state.players.get(client.sessionId);
+            if (p && p.isHost && this.state.players.size >= 2) {
+                this.lock(); // Odayı kilitle (Lobi listesinden kalkar)
                 this.setupGame();
             }
         });
 
+        // Oyun Mesajları
         this.onMessage("play_card", (client, data) => this.handlePlay(client, data));
         this.onMessage("draw_card", (client) => this.handleDraw(client));
-        this.onMessage("trigger", (client) => this.handleTrigger(client));
-        this.onMessage("chat", (client, msg) => this.broadcast("chat_msg", { user: this.state.players.get(client.sessionId).name, text: msg }));
+        
+        // Chat
+        this.onMessage("chat", (client, msg) => {
+            const p = this.state.players.get(client.sessionId);
+            this.broadcast("chat_msg", { user: p.name, text: msg });
+        });
     }
 
     onJoin(client, options) {
         const p = new Player();
-        p.name = (options.name || "Operative").substring(0, 12);
-        p.avatarColor = `hsl(${Math.random()*360}, 100%, 50%)`;
+        p.name = (options.name || "Player").substring(0, 12);
+        
+        // Boş koltuk bul
+        let seat = this.seats.indexOf(null);
+        this.seats[seat] = client.sessionId;
+        p.seatIndex = seat;
 
-        // Koltuk Bul
-        let seatIdx = this.seats.indexOf(null);
-        if (seatIdx === -1) seatIdx = 0; // Fallback
-        this.seats[seatIdx] = client.sessionId;
-        p.seat = seatIdx;
-
-        // Host Ata
-        if (this.state.players.size === 0) {
-            p.isHost = true;
-            this.state.hostId = client.sessionId;
-        }
+        // İlk giren Host olur
+        if (this.state.players.size === 0) p.isHost = true;
 
         this.state.players.set(client.sessionId, p);
-        this.broadcast("notification", `> ${p.name.toUpperCase()} SİSTEME GİRİŞ YAPTI.`);
+        this.broadcast("notification", `${p.name} ODAYA GİRDİ.`);
     }
 
     onLeave(client) {
         const p = this.state.players.get(client.sessionId);
-        if (p) this.seats[p.seat] = null;
+        if(p) this.seats[p.seatIndex] = null;
         this.state.players.delete(client.sessionId);
-
-        // Yeni Host
-        if (client.sessionId === this.state.hostId && this.state.players.size > 0) {
+        
+        // Host devretme
+        if(p.isHost && this.state.players.size > 0) {
             const nextId = this.state.players.keys().next().value;
-            this.state.hostId = nextId;
             this.state.players.get(nextId).isHost = true;
-            this.broadcast("notification", "> YENİ YÖNETİCİ ATANDI.");
         }
     }
 
     setupGame() {
-        // Deste
+        // Deste Oluştur
         const colors = ["red", "blue", "green", "yellow"];
-        const vals = ["0","1","2","3","4","5","6","7","8","9","skip","reverse","+2"];
+        const values = ["0","1","2","3","4","5","6","7","8","9","skip","reverse","+2"];
         const deck = [];
+        
         colors.forEach(c => {
-            vals.forEach(v => deck.push(new Card(c, v)));
+            values.forEach(v => {
+                deck.push(new Card(c, v));
+                if(v !== "0") deck.push(new Card(c, v)); // 0 hariç her karttan 2 tane
+            });
             deck.push(new Card("black", "wild"));
+            deck.push(new Card("black", "+4"));
         });
-        deck.sort(() => Math.random() - 0.5);
+
+        // Karıştır
+        this.deck = deck.sort(() => Math.random() - 0.5);
 
         // Dağıt
         this.state.players.forEach(p => {
             p.hand.clear();
-            for(let i=0; i<7; i++) p.hand.push(deck.pop());
+            for(let i=0; i<7; i++) p.hand.push(this.drawFromDeck());
         });
 
-        // Ortaya koy
-        let top = deck.pop();
-        while(top.color === "black") top = deck.pop();
-        this.state.topCard = new Card(top.color, top.value);
+        // Ortaya aç (Joker olmamalı)
+        let top = this.drawFromDeck();
+        while(top.color === "black") top = this.drawFromDeck();
+        this.state.topCard = top;
 
         // Sıra
-        this.state.playerKeys = Array.from(this.state.players.keys());
-        this.state.turnIdx = 0;
-        this.state.currentTurn = this.state.playerKeys[0];
-        
-        // Rulet
-        this.state.chamber = Math.floor(Math.random() * 6);
+        this.playerKeys = Array.from(this.state.players.keys());
+        this.turnIndex = 0;
+        this.state.currentTurn = this.playerKeys[0];
         this.state.gameStatus = "PLAYING";
         
         this.broadcast("start_game");
     }
 
     handlePlay(client, data) {
-        if (this.state.currentTurn !== client.sessionId) return;
+        if(this.state.currentTurn !== client.sessionId) return;
+        
         const p = this.state.players.get(client.sessionId);
         const card = p.hand[data.index];
         const top = this.state.topCard;
 
-        if (card.color === "black" || card.color === top.color || card.value === top.value) {
+        // UNO KURAL KONTROLÜ
+        let isValid = false;
+        if (card.color === "black") isValid = true; // Jokerler her zaman
+        else if (card.color === top.color || card.value === top.value) isValid = true;
+
+        if (isValid) {
+            // Kartı oyna
             p.hand.splice(data.index, 1);
+            
+            // Renk değiştirme (Wild)
             if (data.color) card.color = data.color;
             this.state.topCard = new Card(card.color, card.value);
 
+            // KAZANMA KONTROLÜ
             if (p.hand.length === 0) {
-                this.broadcast("notification", `>>> ${p.name} KAZANDI! <<<`);
                 this.broadcast("game_over", p.name);
+                this.state.gameStatus = "LOBBY";
             } else {
-                if (card.value === "skip" || card.value === "reverse") this.rotateTurn(); // 2 kişilikte reverse=skip
-                this.rotateTurn();
+                // Efekt Kartları
+                if (card.value === "skip") this.nextTurn(2); // Bir sonrakini atla
+                else if (card.value === "reverse") {
+                    if (this.state.players.size === 2) this.nextTurn(2); // 2 kişide skip gibidir
+                    else this.state.direction *= -1; // Yön değiştir
+                    this.nextTurn(1);
+                }
+                else if (card.value === "+2") {
+                    this.state.drawStack += 2;
+                    this.nextTurn(1);
+                }
+                else if (card.value === "+4") {
+                    this.state.drawStack += 4;
+                    this.nextTurn(1);
+                }
+                else {
+                    this.nextTurn(1);
+                }
             }
         }
     }
 
     handleDraw(client) {
-        if (this.state.currentTurn !== client.sessionId) return;
+        if(this.state.currentTurn !== client.sessionId) return;
         const p = this.state.players.get(client.sessionId);
-        // Random kart
-        const colors = ["red", "blue", "green", "yellow"];
-        p.hand.push(new Card(colors[Math.floor(Math.random()*4)], Math.floor(Math.random()*9).toString()));
-        this.rotateTurn();
+        
+        // Ceza var mı?
+        const count = this.state.drawStack > 0 ? this.state.drawStack : 1;
+        for(let i=0; i<count; i++) p.hand.push(this.drawFromDeck());
+        
+        // Ceza sıfırla ve sıra geç
+        this.state.drawStack = 0;
+        this.nextTurn(1);
     }
 
-    handleTrigger(client) {
-        // Basit Rulet: %16 Şans
-        const dead = Math.random() < 0.166;
-        if(dead) {
-            const p = this.state.players.get(client.sessionId);
-            p.isDead = true;
-            this.broadcast("notification", `!!! ${p.name} ELENDİ !!!`);
-            this.broadcast("sound", "bang");
+    nextTurn(step) {
+        const len = this.playerKeys.length;
+        if (this.state.direction === 1) {
+            this.turnIndex = (this.turnIndex + step) % len;
         } else {
-            this.broadcast("notification", `> ${this.state.players.get(client.sessionId).name} HAYATTA KALDI.`);
-            this.broadcast("sound", "click");
+            this.turnIndex = (this.turnIndex - step + len * 10) % len;
         }
-        this.rotateTurn();
+        this.state.currentTurn = this.playerKeys[this.turnIndex];
     }
 
-    rotateTurn() {
-        let loop = 0;
-        do {
-            this.state.turnIdx = (this.state.turnIdx + 1) % this.state.playerKeys.length;
-            const nextId = this.state.playerKeys[this.state.turnIdx];
-            const p = this.state.players.get(nextId);
-            if (p && !p.isDead) {
-                this.state.currentTurn = nextId;
-                return;
-            }
-            loop++;
-        } while(loop < 5);
+    drawFromDeck() {
+        if (this.deck.length === 0) {
+            // Deste biterse sanal kart üret (Basitlik için)
+            const colors = ["red", "blue", "green", "yellow"];
+            const vals = ["1","2","3","4","5","6","7","8","9"];
+            return new Card(colors[Math.floor(Math.random()*4)], vals[Math.floor(Math.random()*9)]);
+        }
+        return this.deck.pop();
     }
 }
 
@@ -203,6 +227,6 @@ app.get('/healthz', (req, res) => res.send('OK'));
 
 const server = http.createServer(app);
 const gameServer = new Server({ server: server });
-gameServer.define("high_stakes_room", CyberRoom).enableRealtimeListing();
+gameServer.define("uno_room", UnoRoom).enableRealtimeListing();
 
-server.listen(process.env.PORT || 3000, () => console.log("Cyber Core Online"));
+server.listen(process.env.PORT || 3000, () => console.log("UNO Server Online"));
