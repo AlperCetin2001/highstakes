@@ -4,7 +4,7 @@ const cors = require('cors');
 const { Server, Room } = require('colyseus');
 const { Schema, MapSchema, ArraySchema, type } = require('@colyseus/schema');
 
-// --- 1. VERİ YAPILARI (SCHEMA) ---
+// --- SCHEMA (VERİ YAPISI) ---
 class Card extends Schema {
     constructor(color, value) {
         super();
@@ -20,10 +20,12 @@ class Player extends Schema {
         super();
         this.hand = new ArraySchema();
         this.name = "Player";
+        this.isReady = false;
     }
 }
 type([Card])(Player.prototype, "hand");
 type("string")(Player.prototype, "name");
+type("boolean")(Player.prototype, "isReady");
 
 class GameState extends Schema {
     constructor() {
@@ -32,64 +34,34 @@ class GameState extends Schema {
         this.deck = new ArraySchema();
         this.discardPile = new ArraySchema();
         this.currentTurn = "";
-        this.gameStatus = "LOBBY"; // LOBBY, PLAYING, ROULETTE
-        this.turnIndex = 0;
+        this.gameStatus = "LOBBY"; // LOBBY, PLAYING
+        this.hostSessionId = ""; // Odayı kuran kişi
     }
 }
 type({ map: Player })(GameState.prototype, "players");
 type([Card])(GameState.prototype, "discardPile");
 type("string")(GameState.prototype, "currentTurn");
 type("string")(GameState.prototype, "gameStatus");
+type("string")(GameState.prototype, "hostSessionId");
 type(Card)(GameState.prototype, "topCard");
 
-// --- 2. OYUN MANTIĞI (ROOM) ---
+// --- ODA MANTIĞI ---
 class HighStakesRoom extends Room {
     onCreate(options) {
+        this.maxClients = 4; // MAKSİMUM 4 KİŞİ
         this.setState(new GameState());
-        this.maxClients = 4;
 
-        // Mesajları Dinle
         this.onMessage("start_game", (client) => {
-            if(this.state.players.size >= 2) this.setupGame();
-            else this.broadcast("notification", "EN AZ 2 OYUNCU GEREKLİ!");
+            // Sadece Host başlatabilir ve en az 2 kişi lazım
+            if (client.sessionId === this.state.hostSessionId && this.state.players.size >= 2) {
+                this.setupGame();
+                this.lock(); // ODAYI KİLİTLE (Artık listede görünmez)
+            }
         });
 
         this.onMessage("play_card", (client, data) => {
             if (this.state.currentTurn !== client.sessionId) return;
-            if (this.state.gameStatus !== "PLAYING") return;
-
-            const player = this.state.players.get(client.sessionId);
-            const card = player.hand[data.index];
-            const top = this.state.topCard;
-
-            // Uno Kural Kontrolü
-            let isValid = false;
-            if (card.color === "black") isValid = true; // Joker her zaman oynanır
-            else if (card.color === top.color || card.value === top.value) isValid = true;
-
-            if (isValid) {
-                // Kartı elden çıkar
-                player.hand.splice(data.index, 1);
-                
-                // Eğer Jokerse rengi değiştir
-                if(data.color) card.color = data.color;
-                
-                this.state.topCard = new Card(card.color, card.value);
-                this.state.discardPile.push(this.state.topCard);
-
-                // Kontrol: Kart bitti mi?
-                if (player.hand.length === 0) {
-                    this.broadcast("notification", `${player.name} KAZANDI!`);
-                    this.state.gameStatus = "LOBBY";
-                    return;
-                }
-
-                // Özel Kartlar
-                if(card.value === "skip") this.nextTurn(); 
-                // (Reverse 2 kişiyle skip gibidir)
-                
-                this.nextTurn();
-            }
+            this.handleCardPlay(client, data);
         });
 
         this.onMessage("draw_card", (client) => {
@@ -97,42 +69,41 @@ class HighStakesRoom extends Room {
             this.drawCard(client.sessionId, 1);
             this.nextTurn();
         });
-
+        
         this.onMessage("roulette_result", (client, result) => {
-            if(result === "dead") {
-                this.broadcast("notification", `${this.state.players.get(client.sessionId).name} ELENDİ!`);
-                // Reset game logic here if needed
-            } else {
-                this.broadcast("notification", "TETİK BOŞ ÇIKTI. OYUN DEVAM EDİYOR.");
-                this.state.gameStatus = "PLAYING";
-                this.nextTurn();
-            }
+             // Rulet mantığı buraya (Önceki kodlardaki gibi)
+             this.broadcast("notification", result === "dead" ? "OYUNCU ELENDİ!" : "ŞANSLI GÜNÜNDESİN.");
+             if(result !== "dead") this.nextTurn();
         });
     }
 
     onJoin(client, options) {
-        console.log(client.sessionId, "katıldı.");
+        console.log("Katıldı:", client.sessionId);
         const player = new Player();
-        player.name = options.name || "Drifter " + Math.floor(Math.random()*100);
+        player.name = options.name || `Oyuncu ${this.clients.length}`;
         this.state.players.set(client.sessionId, player);
-        
-        this.broadcast("notification", `${player.name} GİRİŞ YAPTI.`);
+
+        // İlk giren Host olur
+        if (this.state.players.size === 1) {
+            this.state.hostSessionId = client.sessionId;
+        }
+
+        this.broadcast("notification", `${player.name} KATILDI.`);
     }
 
     onLeave(client) {
         this.state.players.delete(client.sessionId);
-        this.broadcast("notification", "BİR OYUNCU AYRILDI.");
+        // Eğer Host çıktıysa, odayı sonraki kişiye devret veya kapat (Basitlik için kapatmıyoruz)
     }
 
     setupGame() {
-        // Deste Oluştur
+        // UNO DESTE MANTIĞI
         const colors = ["red", "blue", "green", "yellow"];
         const values = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "skip", "reverse", "+2"];
         const deck = [];
-        
         colors.forEach(c => {
             values.forEach(v => deck.push(new Card(c, v)));
-            deck.push(new Card(c, "wild")); // Her renkten bir joker gibi düşünelim
+            deck.push(new Card("black", "wild"));
         });
         
         // Karıştır
@@ -140,41 +111,56 @@ class HighStakesRoom extends Room {
             const j = Math.floor(Math.random() * (i + 1));
             [deck[i], deck[j]] = [deck[j], deck[i]];
         }
-        
-        // Dağıt (7 Kart)
-        this.state.players.forEach(player => {
-            player.hand.clear();
-            for(let i=0; i<7; i++) player.hand.push(deck.pop());
+
+        // Dağıt
+        this.state.players.forEach(p => {
+            for(let i=0; i<7; i++) p.hand.push(deck.pop());
         });
 
         // Ortaya Aç
         let top = deck.pop();
-        while(top.color === "black") top = deck.pop(); // İlk kart joker olmasın
+        while(top.color === "black") top = deck.pop();
         this.state.topCard = top;
         this.state.discardPile.push(top);
-
-        this.state.deck = new ArraySchema(...deck); // Kalanlar
         
-        // Sıra Belirle
+        // Sıra
         this.state.playerKeys = Array.from(this.state.players.keys());
         this.state.turnIndex = 0;
         this.state.currentTurn = this.state.playerKeys[0];
         this.state.gameStatus = "PLAYING";
 
         this.broadcast("start_game");
-        this.broadcast("notification", "OYUN BAŞLADI!");
     }
 
-    drawCard(sessionId, amount) {
-        const player = this.state.players.get(sessionId);
-        for(let i=0; i<amount; i++) {
-            // Deste bittiyse (Basitçe yeniden oluşturmuyoruz, demo olduğu için sanal kart veriyoruz)
-            const colors = ["red", "blue", "green", "yellow"];
-            const values = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-            const c = colors[Math.floor(Math.random()*4)];
-            const v = values[Math.floor(Math.random()*9)];
-            player.hand.push(new Card(c, v));
+    handleCardPlay(client, data) {
+        const player = this.state.players.get(client.sessionId);
+        const card = player.hand[data.index];
+        const top = this.state.topCard;
+
+        let isValid = (card.color === "black") || (card.color === top.color || card.value === top.value);
+        
+        if (isValid) {
+            player.hand.splice(data.index, 1);
+            if(data.color) card.color = data.color; // Joker renk seçimi
+            this.state.topCard = new Card(card.color, card.value);
+            this.state.discardPile.push(this.state.topCard);
+            
+            if(player.hand.length === 0) {
+                this.broadcast("notification", `${player.name} KAZANDI!`);
+                // Oyunu bitir veya lobiye dön
+            } else {
+                this.nextTurn();
+            }
         }
+    }
+
+    drawCard(sid, amount) {
+        const p = this.state.players.get(sid);
+        // Basitlik için rastgele kart veriyoruz (Deste biterse diye)
+        const colors = ["red", "blue", "green", "yellow"];
+        const c = colors[Math.floor(Math.random()*4)];
+        const v = Math.floor(Math.random()*9).toString();
+        p.hand.push(new Card(c, v));
     }
 
     nextTurn() {
@@ -183,20 +169,17 @@ class HighStakesRoom extends Room {
     }
 }
 
-// --- 3. SUNUCU BAŞLATMA ---
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Keep-Alive Endpoint
-app.get('/healthz', (req, res) => res.send('OK'));
+app.get('/healthz', (req, res) => res.send('OK')); // Keep-alive
 
 const server = http.createServer(app);
 const gameServer = new Server({ server: server });
 
-gameServer.define("high_stakes_room", HighStakesRoom);
+// "high_stakes_room" adıyla odayı tanımlıyoruz
+gameServer.define("high_stakes_room", HighStakesRoom)
+    .enableRealtimeListing(); // LİSTELEMEYİ AKTİF ET (ÖNEMLİ)
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
-});
+server.listen(PORT, () => console.log(`Listening on ${PORT}`));
