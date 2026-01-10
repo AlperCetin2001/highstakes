@@ -1,7 +1,7 @@
 {
-  "name": "uno-pro",
+  "name": "high-stakes-redemption",
   "version": "1.0.0",
-  "description": "Dünyanın en iyi web tabanlı UNO oyunu",
+  "description": "High Stakes: Redemption - Web Tabanlı Kart Oyunu",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -15,7 +15,7 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["uno", "game", "multiplayer", "card-game"],
-  "author": "UNO Pro Team",
+  "keywords": ["uno", "game", "high-stakes", "card-game"],
+  "author": "High Stakes Team",
   "license": "MIT"
 }
