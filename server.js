@@ -90,7 +90,7 @@ io.on('connection', (socket) => {
         if (room.gameState === 'PLAYING') {
             const joinerData = { id: socket.id, nickname, avatar };
             io.to(room.hostId).emit('joinRequest', joinerData);
-            socket.emit('notification', { msg: 'Oda sahibine istek gönderildi...', type: 'info' });
+            socket.emit('notification', { msg: 'İstek gönderildi...', type: 'info' });
         } else {
             joinRoomHandler(socket, roomId, nickname, avatar);
         }
@@ -108,9 +108,7 @@ io.on('connection', (socket) => {
             const newPlayer = { 
                 id: joinerId, 
                 nickname: joinerSocket.handshake.query.nickname || 'Misafir',
-                avatar: '👤',
-                hand: [],
-                score: 0 
+                avatar: '👤', hand: [], score: 0 
             };
             
             if (room.deck.length < 7) {
@@ -121,7 +119,6 @@ io.on('connection', (socket) => {
                 }
             }
             newPlayer.hand = room.deck.length >= 7 ? room.deck.splice(0, 7) : [];
-            
             room.players.push(newPlayer);
             addLog(room, `Yeni oyuncu katıldı!`);
             broadcastGameState(roomId);
@@ -135,10 +132,7 @@ io.on('connection', (socket) => {
         const room = rooms.get(roomId);
         
         if (!room || room.hostId !== socket.id) return;
-        if (room.players.length < 2) {
-            socket.emit('error', 'En az 2 oyuncu gerekli!');
-            return;
-        }
+        if (room.players.length < 2) return socket.emit('error', 'En az 2 oyuncu gerekli!');
 
         room.gameState = 'PLAYING';
         room.deck = createDeck();
@@ -156,7 +150,7 @@ io.on('connection', (socket) => {
         room.discardPile.push(first);
         room.currentColor = first.color;
         
-        addLog(room, "Oyun Başladı! 60 saniye süreniz var.");
+        addLog(room, "Oyun Başladı! 60sn süreniz var.");
         startTurnTimer(room);
         broadcastGameState(roomId);
     });
@@ -174,81 +168,29 @@ io.on('connection', (socket) => {
         const card = player.hand[cardIndex];
         const top = room.discardPile[room.discardPile.length - 1];
         
-        // --- KURAL KONTROLÜ ---
+        // --- DOĞRULAMA ---
+        // Wild kartlar her zaman oynanabilir (Blöf olsa bile mekanik olarak atılabilir).
         let isValid = false;
-        
-        if (card.color === 'black') {
-            isValid = true;
-        } else if (card.color === room.currentColor) {
-            isValid = true;
-        } else if (card.value === top.value) {
-            isValid = true;
-        }
+        if (card.color === 'black') isValid = true;
+        else if (card.color === room.currentColor) isValid = true;
+        else if (card.value === top.value) isValid = true;
 
         if (isValid) {
             resetTurnTimer(room);
+            const oldColor = room.currentColor; // Eski rengi sakla (+4 challenge için)
+
+            // Kartı oyna
             player.hand.splice(cardIndex, 1);
             room.discardPile.push(card);
-            
-            // Renk Güncelleme (Wild ise seçilen, değilse kartın rengi)
-            // ÖNEMLİ: +4 durumunda renk DEĞİŞMELİDİR ki challenge'da eski rengi bilelim.
-            // Bu yüzden handleCardEffect içinde eski rengi saklayacağız.
-            const oldColor = room.currentColor;
             room.currentColor = (card.color === 'black') ? chosenColor : card.color;
 
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
 
             addLog(room, `${player.nickname} attı: ${formatCardName(card)}`);
-            
-            // Efekt Yönetimi (Eski rengi gönderiyoruz ki challenge yapılabilsin)
             handleCardEffect(room, card, player, oldColor);
         } else {
             socket.emit('error', 'Bu kartı oynayamazsın!');
         }
-    });
-
-    socket.on('sendEmote', ({ message }) => {
-        const roomId = getPlayerRoomId(socket.id);
-        if (roomId) {
-            io.to(roomId).emit('emoteReceived', { playerId: socket.id, message });
-        }
-    });
-
-    // Çoklu Kart
-    socket.on('playCards', ({ cardIndices, chosenColor }) => {
-        const roomId = getPlayerRoomId(socket.id);
-        if (!roomId) return;
-        const room = rooms.get(roomId);
-        const player = room.players.find(p => p.id === socket.id);
-
-        if (room.players[room.turnIndex].id !== socket.id) return;
-        if (room.pendingChallenge) return;
-
-        cardIndices.sort((a, b) => b - a);
-        
-        const cardsToPlay = cardIndices.map(idx => player.hand[idx]);
-        const firstCard = cardsToPlay[cardsToPlay.length - 1];
-        const top = room.discardPile[room.discardPile.length - 1];
-
-        const allSameValue = cardsToPlay.every(c => c.value === firstCard.value);
-        if (!allSameValue) return socket.emit('error', 'Sadece aynı değerdeki kartlar!');
-
-        let isFirstValid = (firstCard.color === 'black') || (firstCard.color === room.currentColor) || (firstCard.value === top.value);
-        if (!isFirstValid) return socket.emit('error', 'Seçilen kartlar uyumsuz.');
-
-        resetTurnTimer(room);
-        cardIndices.forEach(idx => { player.hand.splice(idx, 1); });
-        cardsToPlay.forEach(c => room.discardPile.push(c));
-
-        const lastPlayed = cardsToPlay[0];
-        const oldColor = room.currentColor;
-        room.currentColor = (lastPlayed.color === 'black') ? chosenColor : lastPlayed.color;
-
-        if (player.hand.length !== 1) room.unoCallers.delete(player.id);
-
-        addLog(room, `${player.nickname} ${cardsToPlay.length} kart birden attı!`);
-        
-        handleMultiCardEffect(room, lastPlayed, player, cardsToPlay.length, oldColor);
     });
 
     socket.on('drawCard', () => {
@@ -280,6 +222,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // +4 CHALLENGE YANITI
     socket.on('challengeDecision', ({ decision }) => {
         const roomId = getPlayerRoomId(socket.id);
         const room = rooms.get(roomId);
@@ -289,28 +232,42 @@ io.on('connection', (socket) => {
         const attacker = room.players.find(p => p.id === attackerId);
         const victim = room.players.find(p => p.id === victimId);
 
+        // Challenge Bitti, timer'ı sıfırla
+        room.pendingChallenge = null;
+
         if (decision === 'accept') {
-            addLog(room, `${victim.nickname} kabul etti (+4).`);
+            // Kabul etti: Victim 4 çeker, sıra atlar
+            addLog(room, `${victim.nickname} +4'ü kabul etti.`);
             drawCards(room, victim, 4);
+            advanceTurn(room); // Victim'i atla (Zaten handleEffect'te sıra victim'deydi ama bekliyordu)
+            // handleEffect'te advanceTurn yapılmamıştı, burada victim'i atlayıp sonrakine geçmeliyiz.
+            // Current turn is still Attacker technically in our logic flow wait...
+            // Let's verify flow: 
+            // 1. Attacker plays +4 -> pendingChallenge set -> turn NOT advanced.
+            // 2. Decision comes.
+            // So turn is still on Attacker. We need to skip Victim and go to next.
+            advanceTurn(room); // Attacker -> Victim
+            advanceTurn(room); // Victim -> Next
         } else {
-            // Blöf Kontrolü: Attacker'ın elinde ESKİ RENGİN AYNISINDAN kart var mıydı? (Wild hariç)
-            // Not: Elindeki kartlar şu anki elidir (Attığı kart çıkmıştır).
+            // Meydan Okudu
             const hasColor = attacker.hand.some(c => c.color === oldColor && c.color !== 'black');
-            
             if (hasColor) {
-                // BLÖF YAPTI! Attacker 4 kart çeker.
-                addLog(room, `⚖️ BLÖF YAKALANDI! ${attacker.nickname} 4 kart çekiyor.`);
+                // BLÖF (SUÇLU): Attacker 4 çeker. Victim çekmez.
+                addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} blöf yaptı, 4 kart çekiyor!`);
                 drawCards(room, attacker, 4);
-                // Victim kurtulur, kart çekmez.
+                // Sıra Victim'e geçer (oynama hakkı kazanır mı? Kurallara göre sadece ceza iptal olur, sıra geçer mi?)
+                // Resmi kural: "If guilty, challenger does NOT draw. Play continues." 
+                // Yani sıra Attacker'dan Victim'e geçer.
+                advanceTurn(room); 
             } else {
-                // TEMİZ OYNADI! Victim 6 kart çeker (4 ceza + 2 yanlış suçlama).
-                addLog(room, `⚖️ TEMİZ OYUN! ${victim.nickname} özür dileyip 6 kart çekiyor.`);
+                // TEMİZ (SUÇSUZ): Victim 6 çeker.
+                addLog(room, `⚖️ BAŞARISIZ! ${attacker.nickname} dürüsttü. ${victim.nickname} 6 kart çekiyor!`);
                 drawCards(room, victim, 6);
+                advanceTurn(room); // Attacker -> Victim
+                advanceTurn(room); // Victim -> Next (Cezalı olduğu için oynayamaz)
             }
         }
         
-        room.pendingChallenge = null;
-        advanceTurn(room); // Sıra victim'den sonrakine geçer (victim sırasını kaybeder)
         broadcastGameState(roomId);
         startTurnTimer(room);
     });
@@ -329,15 +286,17 @@ io.on('connection', (socket) => {
             }
         }
     });
+    
+    // Emoji
+    socket.on('sendEmote', ({ message }) => {
+        const roomId = getPlayerRoomId(socket.id);
+        if (roomId) io.to(roomId).emit('emoteReceived', { playerId: socket.id, message });
+    });
 });
 
-// --- OYUN MANTIĞI & +4 DÜZELTMESİ ---
+// --- OYUN MANTIĞI ---
 
 function handleCardEffect(room, card, player, oldColor) {
-    handleMultiCardEffect(room, card, player, 1, oldColor);
-}
-
-function handleMultiCardEffect(room, card, player, count, oldColor) {
     let skipTurn = false;
 
     if (card.value === 'skip') { 
@@ -345,42 +304,28 @@ function handleMultiCardEffect(room, card, player, count, oldColor) {
         addLog(room, "Sıra atladı!"); 
     } 
     else if (card.value === 'reverse') {
-        if (count % 2 !== 0) {
-            room.direction *= -1;
-            addLog(room, "Yön değişti!");
-        }
-        // 2 Kişilik oyunda Reverse = Skip
-        if (room.players.length === 2) { 
-            skipTurn = true; 
-            addLog(room, "2 Kişi: Yön Değiştir = Atla");
-        }
+        room.direction *= -1;
+        addLog(room, "Yön değişti!");
+        if (room.players.length === 2) { skipTurn = true; }
     }
     else if (card.value === 'draw2') {
         const next = getNextPlayer(room);
-        const totalDraw = 2 * count;
-        drawCards(room, next, totalDraw);
-        addLog(room, `${next.nickname} +${totalDraw} yedi!`);
+        drawCards(room, next, 2);
+        addLog(room, `${next.nickname} +2 yedi!`);
         skipTurn = true;
     }
     else if (card.value === 'wild4') {
-        // +4 MANTIĞI:
-        // Meydan okuma başlatılır. Oyun durur (timer hariç).
-        // Victim'e soru sorulur.
         const nextIdx = getNextPlayerIndex(room);
         const nextPlayer = room.players[nextIdx];
         
-        room.pendingChallenge = { 
-            attackerId: player.id, 
-            victimId: nextPlayer.id, 
-            oldColor: oldColor // Kart atılmadan önceki renk
-        };
+        // KRİTİK: +4 Challenge başlat. Sırayı ilerletme.
+        room.pendingChallenge = { attackerId: player.id, victimId: nextPlayer.id, oldColor: oldColor };
         
         io.to(nextPlayer.id).emit('challengePrompt', { attacker: player.nickname });
         broadcastGameState(room.id);
-        return; // DİKKAT: Fonksiyondan çıkıyoruz, tur ilerlemiyor.
+        return; // BURADA DURUYORUZ, Yanıt gelince devam edecek.
     }
 
-    // Oyun Bitti mi?
     if (player.hand.length === 0) {
         finishGame(room, player);
         return;
@@ -423,13 +368,8 @@ function finishGame(room, winner) {
 
     setTimeout(() => {
         room.gameState = 'LOBBY';
-        room.players.forEach(p => {
-            p.hand = [];
-            p.cardCount = 0;
-            p.hasUno = false;
-        });
-        room.deck = [];
-        room.discardPile = [];
+        room.players.forEach(p => { p.hand = []; p.cardCount = 0; p.hasUno = false; });
+        room.deck = []; room.discardPile = [];
         broadcastGameState(room.id);
     }, 8000);
 }
@@ -437,12 +377,9 @@ function finishGame(room, winner) {
 function joinRoomHandler(socket, roomId, nickname, avatar) {
     const room = rooms.get(roomId);
     if (!room) return socket.emit('error', 'Oda yok.');
-    
     socket.join(roomId);
     const existing = room.players.find(p => p.id === socket.id);
-    if(!existing) {
-        room.players.push({ id: socket.id, nickname, avatar, hand: [] });
-    }
+    if(!existing) room.players.push({ id: socket.id, nickname, avatar, hand: [] });
     broadcastGameState(roomId);
 }
 
@@ -503,11 +440,8 @@ function broadcastGameState(roomId) {
                 gameState: room.gameState,
                 playerCount: room.players.length,
                 players: room.players.map(pl => ({ 
-                    id: pl.id, 
-                    nickname: pl.nickname, 
-                    avatar: pl.avatar,
-                    cardCount: pl.hand.length,
-                    hasUno: room.unoCallers.has(pl.id)
+                    id: pl.id, nickname: pl.nickname, avatar: pl.avatar,
+                    cardCount: pl.hand.length, hasUno: room.unoCallers.has(pl.id)
                 })),
                 myHand: p.hand,
                 topCard: room.discardPile[room.discardPile.length-1],
@@ -522,4 +456,4 @@ function broadcastGameState(roomId) {
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log('UNO Legendary Server Aktif!'));
+server.listen(PORT, () => console.log('UNO Legend Server V2 Aktif!'));
