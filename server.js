@@ -107,13 +107,12 @@ io.on('connection', (socket) => {
             joinerSocket.join(roomId);
             const newPlayer = { 
                 id: joinerId, 
-                nickname: joinerSocket.handshake.query.nickname || 'Misafir', // Not: Query string kullanılmıyorsa basit fallback
+                nickname: joinerSocket.handshake.query.nickname || 'Misafir', 
                 avatar: '👤',
                 hand: [],
                 score: 0 
             };
             
-            // Deste bitmiş olabilir kontrolü
             if (room.deck.length < 7) {
                 if (room.discardPile.length > 1) {
                     const top = room.discardPile.pop();
@@ -121,7 +120,6 @@ io.on('connection', (socket) => {
                     room.discardPile = [top];
                 }
             }
-            // Kart ver (eğer deste hala boşsa boş array verilir, oyun çökmez)
             newPlayer.hand = room.deck.length >= 7 ? room.deck.splice(0, 7) : [];
             
             room.players.push(newPlayer);
@@ -178,9 +176,6 @@ io.on('connection', (socket) => {
         const top = room.discardPile[room.discardPile.length - 1];
         
         // --- DOĞRULAMA (Fix) ---
-        // Joker her zaman oynanır.
-        // Renk tutuyorsa oynanır (room.currentColor joker sonrası rengi tutar).
-        // Sayı/Değer tutuyorsa oynanır (Top card joker olsa bile değeri 'wild'dır).
         let isValid = false;
         
         if (card.color === 'black') {
@@ -196,7 +191,6 @@ io.on('connection', (socket) => {
             player.hand.splice(cardIndex, 1);
             room.discardPile.push(card);
             
-            // Renk Güncelle
             room.currentColor = (card.color === 'black') ? chosenColor : card.color;
 
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
@@ -226,13 +220,12 @@ io.on('connection', (socket) => {
         if (room.players[room.turnIndex].id !== socket.id) return;
         if (room.pendingChallenge) return;
 
-        cardIndices.sort((a, b) => b - a); // Tersten silmek için
+        cardIndices.sort((a, b) => b - a); 
         
         const cardsToPlay = cardIndices.map(idx => player.hand[idx]);
         const firstCard = cardsToPlay[cardsToPlay.length - 1];
         const top = room.discardPile[room.discardPile.length - 1];
 
-        // Doğrulama
         const allSameValue = cardsToPlay.every(c => c.value === firstCard.value);
         if (!allSameValue) return socket.emit('error', 'Sadece aynı değerdeki kartlar!');
 
@@ -250,7 +243,6 @@ io.on('connection', (socket) => {
 
         addLog(room, `${player.nickname} ${cardsToPlay.length} kart birden attı!`);
         
-        // Çoklu efekt
         handleMultiCardEffect(room, lastPlayed, player, cardsToPlay.length);
     });
 
