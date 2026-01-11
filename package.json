@@ -1,7 +1,7 @@
 {
-  "name": "uno-pro-3d",
-  "version": "2.0.0",
-  "description": "3D Web Tabanlı UNO Oyunu",
+  "name": "uno-pro-server",
+  "version": "1.0.0",
+  "description": "UNO Game Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
