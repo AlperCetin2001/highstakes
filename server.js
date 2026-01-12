@@ -134,7 +134,8 @@ io.on('connection', (socket) => {
                 nickname: nickname,
                 avatar: avatar,
                 hand: [],
-                score: 0 
+                score: 0,
+                totalScore: 0
             };
             
             if (room.deck.length < 7) {
@@ -406,24 +407,19 @@ function startTurnTimer(room) {
     room.turnDeadline = Date.now() + 60000;
     
     room.timer = setTimeout(() => {
-        // GÜVENLİK KONTROLÜ: Oda hala var mı?
         if(!rooms.has(room.id)) return;
         
         const currentPlayer = room.players[room.turnIndex];
-        // Oyuncu hala oyunda mı?
         if (!currentPlayer) {
             advanceTurn(room);
             broadcastGameState(room.id);
             return;
         }
 
-        // OTOMATİK İŞLEM
         drawCards(room, currentPlayer, 1);
         addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, kart çekti.`);
         advanceTurn(room);
         broadcastGameState(room.id);
-        
-        // Timer'ı tekrar başlat
         startTurnTimer(room);
     }, 60000);
 }
@@ -432,13 +428,30 @@ function resetTurnTimer(room) { if(room.timer) clearTimeout(room.timer); }
 
 function finishGame(room, winner) {
     if(room.timer) clearTimeout(room.timer);
-    let totalScore = 0;
-    room.players.forEach(p => { p.hand.forEach(c => totalScore += c.score); });
     
+    let roundScore = 0;
+    // Diğer oyuncuların elindeki kartların toplamını hesapla
+    room.players.forEach(p => {
+        if (p.id !== winner.id) {
+            p.hand.forEach(c => roundScore += c.score);
+        }
+    });
+
+    // Kazanan oyuncunun toplam skorunu güncelle
+    if (!winner.totalScore) winner.totalScore = 0;
+    winner.totalScore += roundScore;
+
+    // Oyuncu listesindeki kazananı da güncelle
+    const winnerInList = room.players.find(p => p.id === winner.id);
+    if(winnerInList) winnerInList.totalScore = winner.totalScore;
+    
+    // Skora göre sırala
+    const sortedPlayers = [...room.players].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+
     io.to(room.id).emit('gameOver', { 
         winner: winner.nickname, 
-        score: totalScore,
-        players: room.players
+        score: roundScore,
+        players: sortedPlayers
     });
 }
 
@@ -454,7 +467,8 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
             nickname: nickname, 
             avatar: avatar, 
             hand: [],
-            score: 0 
+            score: 0,
+            totalScore: 0
         });
     }
     broadcastGameState(roomId);
@@ -462,14 +476,12 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
 
 function drawCards(room, player, count) {
     for(let i=0; i<count; i++) {
-        // Deste bittiyse yenile
         if(room.deck.length === 0) {
             if(room.discardPile.length > 1) {
                 const top = room.discardPile.pop();
                 room.deck = shuffle(room.discardPile);
                 room.discardPile = [top];
             } else {
-                // Deste de bitti, yerdeki de bitti, yeni deste oluştur
                 room.deck = createDeck();
             }
         }
@@ -528,7 +540,8 @@ function broadcastGameState(roomId) {
                     nickname: pl.nickname, 
                     avatar: pl.avatar,
                     cardCount: pl.hand.length,
-                    hasUno: room.unoCallers.has(pl.id)
+                    hasUno: room.unoCallers.has(pl.id),
+                    totalScore: pl.totalScore || 0
                 })),
                 myHand: p.hand,
                 topCard: room.discardPile[room.discardPile.length-1],
