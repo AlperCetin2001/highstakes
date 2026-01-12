@@ -53,7 +53,6 @@ function shuffle(array) {
 // --- SOCKET MANTIĞI ---
 io.on('connection', (socket) => {
     
-    // Bağlantı anında query'den ismi al (F5 atınca misafir olmaması için)
     const queryName = socket.handshake.query.nickname;
     const queryAvatar = socket.handshake.query.avatar;
     if(queryName) {
@@ -69,7 +68,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('createRoom', ({ nickname, avatar }) => {
-        // Socket verisini güncelle
         socket.data.nickname = nickname;
         socket.data.avatar = avatar;
 
@@ -85,8 +83,7 @@ io.on('connection', (socket) => {
             turnIndex: 0,
             direction: 1,
             currentColor: null,
-            logs: [], // Sistem logları
-            chatHistory: [], // Sohbet geçmişi
+            logs: [],
             unoCallers: new Set(),
             pendingChallenge: null,
             timer: null,
@@ -103,10 +100,8 @@ io.on('connection', (socket) => {
         const room = rooms.get(roomId);
         if (!room) return socket.emit('error', 'Oda bulunamadı.');
 
-        // Eğer oyun oynanıyorsa ve bu kişi zaten listedeyse (reconnect)
         const existingPlayer = room.players.find(p => p.nickname === nickname);
         if (existingPlayer && room.gameState === 'PLAYING') {
-             // Reconnect mantığı (Basitçe yerine geçiriyoruz)
              existingPlayer.id = socket.id;
              socket.join(roomId);
              broadcastGameState(roomId);
@@ -142,9 +137,7 @@ io.on('connection', (socket) => {
                 score: 0 
             };
             
-            // Deste bittiyse oluştur
             if (room.deck.length < 7) {
-                 // Basitçe yeni deste verelim oyun ortasında girdiği için
                  room.deck = createDeck(); 
             }
             newPlayer.hand = room.deck.splice(0, 7);
@@ -171,13 +164,9 @@ io.on('connection', (socket) => {
         room.deck = createDeck();
         room.discardPile = [];
         room.direction = 1;
-        
-        // RASTGELE BAŞLANGIÇ
         room.turnIndex = Math.floor(Math.random() * room.players.length);
-        
         room.unoCallers.clear();
         room.logs = [];
-        room.chatHistory = []; // Yeni oyunda sohbeti temizle (isteğe bağlı)
         room.pendingChallenge = null;
         
         room.players.forEach(p => { 
@@ -197,7 +186,6 @@ io.on('connection', (socket) => {
         broadcastGameState(roomId);
     });
 
-    // --- SOHBET SİSTEMİ ---
     socket.on('chatMessage', ({ message, targetId }) => {
         const roomId = getPlayerRoomId(socket.id);
         if (!roomId) return;
@@ -209,24 +197,19 @@ io.on('connection', (socket) => {
             sender: sender.nickname,
             avatar: sender.avatar,
             msg: message,
-            type: 'public', // public, private
+            type: 'public',
             time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})
         };
 
         if (targetId === 'all') {
-            // Herkese gönder
             chatData.type = 'public';
             io.to(roomId).emit('chatBroadcast', chatData);
         } else {
-            // Özel Mesaj
             const targetSocket = io.sockets.sockets.get(targetId);
             if(targetSocket) {
                 chatData.type = 'private';
-                chatData.to = targetSocket.data.nickname; // Kime gittiği bilgisi
-                
-                // Gönderene de göster (Ben -> Ahmet: Selam)
+                chatData.to = targetSocket.data.nickname;
                 socket.emit('chatBroadcast', { ...chatData, isMe: true });
-                // Alıcıya göster (Ahmet -> Bana: Selam)
                 targetSocket.emit('chatBroadcast', { ...chatData, isMe: false });
             }
         }
@@ -341,7 +324,6 @@ io.on('connection', (socket) => {
         if(!roomId) return;
         const room = rooms.get(roomId);
         
-        // Sadece host yapabilir veya herkesi etkiler
         room.gameState = 'LOBBY';
         room.players.forEach(p => {
             p.hand = [];
@@ -353,7 +335,7 @@ io.on('connection', (socket) => {
         room.pendingChallenge = null;
         room.logs = [];
         
-        io.to(roomId).emit('gameReset', { roomId }); // İstemciye "Lobiye dön" emri
+        io.to(roomId).emit('gameReset', { roomId });
         broadcastGameState(roomId);
     });
 
@@ -424,11 +406,24 @@ function startTurnTimer(room) {
     room.turnDeadline = Date.now() + 60000;
     
     room.timer = setTimeout(() => {
+        // GÜVENLİK KONTROLÜ: Oda hala var mı?
+        if(!rooms.has(room.id)) return;
+        
         const currentPlayer = room.players[room.turnIndex];
+        // Oyuncu hala oyunda mı?
+        if (!currentPlayer) {
+            advanceTurn(room);
+            broadcastGameState(room.id);
+            return;
+        }
+
+        // OTOMATİK İŞLEM
         drawCards(room, currentPlayer, 1);
-        addLog(room, `${currentPlayer.nickname} süre doldu.`);
+        addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, kart çekti.`);
         advanceTurn(room);
         broadcastGameState(room.id);
+        
+        // Timer'ı tekrar başlat
         startTurnTimer(room);
     }, 60000);
 }
@@ -452,7 +447,6 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
     if (!room) return socket.emit('error', 'Oda yok.');
     socket.join(roomId);
     
-    // Zaten varsa ekleme (isim çakışması kontrolü yapılabilir)
     const existing = room.players.find(p => p.id === socket.id);
     if(!existing) {
         room.players.push({ 
@@ -468,14 +462,20 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
 
 function drawCards(room, player, count) {
     for(let i=0; i<count; i++) {
+        // Deste bittiyse yenile
         if(room.deck.length === 0) {
             if(room.discardPile.length > 1) {
                 const top = room.discardPile.pop();
                 room.deck = shuffle(room.discardPile);
                 room.discardPile = [top];
-            } else break;
+            } else {
+                // Deste de bitti, yerdeki de bitti, yeni deste oluştur
+                room.deck = createDeck();
+            }
         }
-        player.hand.push(room.deck.pop());
+        if(room.deck.length > 0) {
+            player.hand.push(room.deck.pop());
+        }
     }
 }
 
@@ -496,14 +496,13 @@ function getPlayerRoomId(socketId) {
 }
 
 function addLog(room, msg) {
-    // Bu loglar artık sadece sistem mesajı olarak gidecek
     io.to(room.id).emit('chatBroadcast', {
         sender: 'SİSTEM',
         msg: msg,
         type: 'log',
         time: ''
     });
-    room.logs.push(msg); // Eski log sistemi için yedek
+    room.logs.push(msg);
     if(room.logs.length > 6) room.logs.shift();
 }
 
