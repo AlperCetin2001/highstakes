@@ -61,30 +61,31 @@ io.on('connection', (socket) => {
     }
 
     socket.on('getRooms', () => {
-        // ODA LİSTESİNDE MOD BİLGİSİNİ GÖNDERİYORUZ
         const list = Array.from(rooms.values()).map(r => ({ 
             id: r.id, 
             name: r.name, 
             count: r.players.length, 
             status: r.gameState,
-            mode: r.mode // 'CLASSIC' veya 'UNO_X'
+            mode: r.mode // Mod bilgisini gönder
         }));
         socket.emit('roomList', list);
     });
 
-    // ODA OLUŞTURURKEN MOD SEÇİMİNİ ALIYORUZ
+    // ODA OLUŞTURMA (MOD SEÇİMİ EKLENDİ)
     socket.on('createRoom', ({ nickname, avatar, mode }) => {
         socket.data.nickname = nickname;
         socket.data.avatar = avatar;
 
         const roomId = generateRoomId();
+        const selectedMode = mode === 'UNO_X' ? 'UNO_X' : 'CLASSIC'; // Güvenlik kontrolü
+
         const room = {
             id: roomId,
             name: `${nickname}'in Odası`,
             hostId: socket.id,
             players: [],
             gameState: 'LOBBY',
-            mode: mode || 'CLASSIC', // Varsayılan Klasik
+            mode: selectedMode, // OYUN MODU KAYDEDİLDİ
             deck: [],
             discardPile: [],
             turnIndex: 0,
@@ -94,7 +95,7 @@ io.on('connection', (socket) => {
             unoCallers: new Set(),
             pendingChallenge: null,
             pendingDrawAction: null,
-            drawStack: 0, // UNO X: Biriken ceza puanı
+            drawStack: 0, // UNO X İçin Kart Biriktirme Sayacı
             timer: null,
             turnDeadline: 0
         };
@@ -172,7 +173,7 @@ io.on('connection', (socket) => {
         room.deck = createDeck();
         room.discardPile = [];
         room.direction = 1;
-        room.turnIndex = Math.floor(Math.random() * room.players.length); // Rastgele Başlangıç
+        room.turnIndex = Math.floor(Math.random() * room.players.length);
         room.unoCallers.clear();
         room.logs = [];
         room.pendingChallenge = null;
@@ -203,9 +204,8 @@ io.on('connection', (socket) => {
             room.currentColor = first.color;
         }
 
-        // Başlangıç Kartı Etkileri
         if (first.value === 'skip') {
-            addLog(room, "Başlangıçta Engel! İlk oyuncu atlandı.");
+            addLog(room, "Başlangıçta Engel!");
             advanceTurn(room);
         } else if (first.value === 'reverse') {
             room.direction *= -1;
@@ -213,23 +213,25 @@ io.on('connection', (socket) => {
             if (room.players.length === 2) { advanceTurn(room); } 
             else { room.turnIndex = room.players.length - 1; }
         } else if (first.value === 'draw2') {
+            // UNO X ise stack başlat, değilse çektir
             if (room.mode === 'UNO_X') {
-                // UNO X: Stack başlar, çekme yok
-                room.drawStack += 2;
-                addLog(room, `Başlangıç +2! Stack başladı: ${room.drawStack} kart.`);
+                room.drawStack = 2;
+                addLog(room, "Başlangıçta +2! (UNO X: Birikebilir)");
+                // Sıra geçmez, ilk oyuncu buna cevap vermeli veya çekmeli
             } else {
-                // KLASİK: Hemen çeker
                 const firstPlayer = room.players[room.turnIndex];
-                addLog(room, `Başlangıçta +2! ${firstPlayer.nickname} 2 kart çekiyor ve sıra geçiyor.`);
+                addLog(room, `Başlangıçta +2! ${firstPlayer.nickname} çekiyor.`);
                 drawCards(room, firstPlayer, 2);
                 advanceTurn(room);
             }
         }
         
+        addLog(room, `Oyun Başladı! Mod: ${room.mode === 'UNO_X' ? 'UNO X (Stacking)' : 'Klasik'}`);
         startTurnTimer(room);
         broadcastGameState(roomId);
     });
 
+    // --- KART ÇEKME MANTIĞI (UNO X GÜNCELLEMESİ) ---
     socket.on('drawCard', () => {
         const roomId = getPlayerRoomId(socket.id);
         if (!roomId) return;
@@ -241,26 +243,24 @@ io.on('connection', (socket) => {
         if (room.pendingDrawAction) return;
 
         resetTurnTimer(room);
-        
+
         // UNO X: STACK VARSA HEPSİNİ ÇEK VE TURU BİTİR
         if (room.mode === 'UNO_X' && room.drawStack > 0) {
-            addLog(room, `😞 ${player.nickname} yığılan ${room.drawStack} kartı çekti ve turu kaybetti.`);
+            addLog(room, `💥 ${player.nickname} zinciri kıramadı! Toplam ${room.drawStack} kart çekti.`);
             drawCards(room, player, room.drawStack);
-            room.drawStack = 0; // Stack sıfırlandı
+            room.drawStack = 0;
             advanceTurn(room);
             broadcastGameState(roomId);
             startTurnTimer(room);
             return;
         }
-
-        // NORMAL KART ÇEKME
+        
+        // Normal Çekme İşlemi (Klasik veya Stack yoksa)
         let drawnCard = null;
-        if(room.deck.length === 0) {
-             if(room.discardPile.length > 1) {
-                 const top = room.discardPile.pop();
-                 room.deck = shuffle(room.discardPile);
-                 room.discardPile = [top];
-             }
+        if(room.deck.length === 0 && room.discardPile.length > 1) {
+             const top = room.discardPile.pop();
+             room.deck = shuffle(room.discardPile);
+             room.discardPile = [top];
         }
         if(room.deck.length > 0) drawnCard = room.deck.pop();
         else return;
@@ -268,9 +268,11 @@ io.on('connection', (socket) => {
         player.hand.push(drawnCard);
         addLog(room, `${player.nickname} kart çekti.`);
 
-        // Oynanabilir mi kontrolü
+        // Klasik Kural: Oynanabilir mi kontrolü
         const top = room.discardPile[room.discardPile.length - 1];
         let isPlayable = false;
+        
+        // UNO X Stacking Koruması: Stack varken sadece +2/+4 oynanabilir (Bu blok drawStack > 0 ise yukarıda return olduğu için çalışmaz, normal akış)
         
         if (drawnCard.color === 'black') isPlayable = true;
         else if (room.currentColor && drawnCard.color === room.currentColor) isPlayable = true;
@@ -282,8 +284,8 @@ io.on('connection', (socket) => {
                 card: drawnCard, 
                 message: "Oynanabilir bir kart çektin! Oynamak ister misin?" 
             });
-            broadcastGameState(roomId); 
-            startTurnTimer(room); 
+            broadcastGameState(roomId);
+            startTurnTimer(room);
         } else {
             addLog(room, "Çekilen kart oynanamaz. Sıra geçiyor.");
             advanceTurn(room);
@@ -312,10 +314,10 @@ io.on('connection', (socket) => {
             const oldColor = room.currentColor;
             room.currentColor = (card.color === 'black') ? chosenColor : card.color;
             
-            // UNO X: Otomatik Ceza Kontrolü (Decision sonrası)
+            // UNO X: Otomatik Ceza Kontrolü
             if (room.mode === 'UNO_X' && player.hand.length === 1 && !room.unoCallers.has(player.id)) {
-                addLog(room, `⚡ UNO X KURALI: ${player.nickname} UNO demedi! Otomatik +2 Ceza!`);
-                drawCards(room, player, 2);
+                 addLog(room, `🚨 UNO X KURALI: ${player.nickname} UNO demedi! (+2 Ceza)`);
+                 drawCards(room, player, 2);
             }
 
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
@@ -330,6 +332,35 @@ io.on('connection', (socket) => {
             advanceTurn(room);
             broadcastGameState(roomId);
             startTurnTimer(room);
+        }
+    });
+
+    socket.on('chatMessage', ({ message, targetId }) => {
+        const roomId = getPlayerRoomId(socket.id);
+        if (!roomId) return;
+        const room = rooms.get(roomId);
+        const sender = room.players.find(p => p.id === socket.id);
+        if(!sender) return;
+
+        const chatData = {
+            sender: sender.nickname,
+            avatar: sender.avatar,
+            msg: message,
+            type: 'public',
+            time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})
+        };
+
+        if (targetId === 'all') {
+            chatData.type = 'public';
+            io.to(roomId).emit('chatBroadcast', chatData);
+        } else {
+            const targetSocket = io.sockets.sockets.get(targetId);
+            if(targetSocket) {
+                chatData.type = 'private';
+                chatData.to = targetSocket.data.nickname;
+                socket.emit('chatBroadcast', { ...chatData, isMe: true });
+                targetSocket.emit('chatBroadcast', { ...chatData, isMe: false });
+            }
         }
     });
 
@@ -348,20 +379,24 @@ io.on('connection', (socket) => {
         const top = room.discardPile[room.discardPile.length - 1];
         
         let isValid = false;
-        
-        // UNO X: Stacking Varsa Sadece Uyumlu + Kart Atılabilir
+
+        // --- UNO X STACKING VALIDATION ---
         if (room.mode === 'UNO_X' && room.drawStack > 0) {
+            // Stack varken SADECE stack artırıcı kartlar oynanabilir
+            // +2 üzerine +2 veya +4
+            // +4 üzerine +4 veya +2 (UNO X kuralı: hepsi birbiriyle stacklenir)
             if (card.value === 'draw2' || card.value === 'wild4') {
-                isValid = true; // +2 veya +4 ile stack devam ettirilebilir
+                isValid = true;
             } else {
-                return socket.emit('error', `Yerde ${room.drawStack} ceza kartı var! Sadece +2 veya +4 atabilirsin yada kart çekmelisin!`);
+                socket.emit('error', `Masa yanıyor! Sadece +2 veya +4 atabilirsin yada kart çekmelisin! (Biriken: ${room.drawStack})`);
+                return;
             }
         } else {
-            // Normal Kontrol
+            // NORMAL OYNAMA KURALLARI
             if (card.color === 'black') isValid = true;
             else if (card.color === room.currentColor) isValid = true;
             else if (card.value === top.value) isValid = true;
-            if (room.currentColor === null && card.color !== 'black') isValid = true;
+            if (room.currentColor === null && card.color !== 'black') isValid = true; 
         }
 
         if (isValid) {
@@ -372,17 +407,17 @@ io.on('connection', (socket) => {
             const oldColorForChallenge = room.currentColor;
             room.currentColor = (card.color === 'black') ? chosenColor : card.color;
 
-            // --- UNO CEZASI ---
+            // --- UNO X: OTOMATİK CEZA (STRICT) ---
             if (room.mode === 'UNO_X') {
-                // UNO X: Unuttuysa OTOMATİK ceza
                 if (player.hand.length === 1 && !room.unoCallers.has(player.id)) {
-                    addLog(room, `⚡ UNO X KURALI: ${player.nickname} UNO demedi! Otomatik +2 Ceza!`);
+                    addLog(room, `🚨 UNO X KURALI: ${player.nickname} UNO demedi! (+2 Ceza)`);
                     drawCards(room, player, 2);
                 }
             } else {
-                // KLASİK: Sadece durumu temizle (Rakipler yakalamalı)
+                // KLASİK: Manuel ceza (Catch butonu ile)
+                // Ceza verilmez, sadece durum temizlenir
             }
-            
+
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
 
             addLog(room, `${player.nickname} attı: ${formatCardName(card)}`);
@@ -390,51 +425,6 @@ io.on('connection', (socket) => {
         } else {
             socket.emit('error', 'Bu kartı oynayamazsın!');
         }
-    });
-
-    // --- UNO X: KOMBO (AYNI SAYI) ---
-    // Eğer oyuncu birden fazla kart atıyorsa
-    socket.on('playCards', ({ cardIndices, chosenColor }) => {
-        const roomId = getPlayerRoomId(socket.id);
-        if (!roomId) return;
-        const room = rooms.get(roomId);
-        const player = room.players.find(p => p.id === socket.id);
-
-        // Kombo sadece UNO X modunda açıktır
-        if (room.mode !== 'UNO_X') return socket.emit('error', 'Kombo sadece UNO X modunda!');
-        if (room.drawStack > 0) return socket.emit('error', 'Ceza varken kombo yapamazsın!');
-
-        cardIndices.sort((a, b) => b - a); // Sondan başa silmek için
-        const cardsToPlay = cardIndices.map(idx => player.hand[idx]);
-        const firstCard = cardsToPlay[cardsToPlay.length - 1]; // İlk atılacak kart (validasyon için)
-        const top = room.discardPile[room.discardPile.length - 1];
-
-        // Hepsi aynı DEĞERDE mi? (Renk önemli değil UNO X kombosunda)
-        const allSameValue = cardsToPlay.every(c => c.value === firstCard.value);
-        if (!allSameValue) return socket.emit('error', 'Kombo için kartların sayısı/değeri aynı olmalı!');
-
-        // İlk kart yere uyuyor mu?
-        let isFirstValid = (firstCard.color === 'black') || (firstCard.color === room.currentColor) || (firstCard.value === top.value);
-        if (!isFirstValid) return socket.emit('error', 'İlk kart yere uymuyor.');
-
-        // Oyna
-        resetTurnTimer(room);
-        cardIndices.forEach(idx => player.hand.splice(idx, 1));
-        cardsToPlay.forEach(c => room.discardPile.push(c));
-
-        // Son kartın etkisi geçerli olur
-        const lastPlayed = cardsToPlay[0];
-        room.currentColor = (lastPlayed.color === 'black') ? chosenColor : lastPlayed.color;
-
-        // UNO X Otomatik Ceza
-        if (player.hand.length === 1 && !room.unoCallers.has(player.id)) {
-             addLog(room, `⚡ UNO X: ${player.nickname} UNO demedi! +2 Ceza!`);
-             drawCards(room, player, 2);
-        }
-        if (player.hand.length !== 1) room.unoCallers.delete(player.id);
-
-        addLog(room, `${player.nickname} ${cardsToPlay.length} kartlık KOMBO yaptı!`);
-        handleCardEffect(room, lastPlayed, player, null);
     });
 
     socket.on('callUno', () => {
@@ -456,7 +446,7 @@ io.on('connection', (socket) => {
         const room = rooms.get(roomId);
         if(!room) return;
         
-        // UNO X'te bu buton çalışmaz, sistem otomatiktir.
+        // UNO X modunda bu tuşun işlevi yoktur (Otomatiktir), ama yine de açık kalsın
         if(room.mode === 'UNO_X') return socket.emit('error', 'UNO X modunda cezalar otomatiktir!');
 
         let caughtSomeone = false;
@@ -487,44 +477,36 @@ io.on('connection', (socket) => {
         const victim = room.players.find(p => p.id === victimId);
 
         if (decision === 'accept') {
-            // UNO X: Kabul ederse stack'i çeker
-            if (room.mode === 'UNO_X') {
-                addLog(room, `${victim.nickname} +4'ü kabul etti. Toplam ${room.drawStack} kart çekiyor.`);
-                drawCards(room, victim, room.drawStack);
-                room.drawStack = 0;
-            } else {
-                addLog(room, `${victim.nickname} +4'ü kabul etti.`);
-                drawCards(room, victim, 4);
+            // UNO X: Challenge kabul edilirse, ortadaki STACK + 4 (veya 6) olarak victima geçer
+            // Ancak basitlik adına standart +4 işleyelim, stack varsa üstüne ekleriz
+            let drawAmount = 4;
+            if (room.mode === 'UNO_X' && room.drawStack > 0) {
+                // Stack bozulmaz, bir sonraki oyuncuya geçer ama victim ceza yerse stack sıfırlanır
+                // UNO X Wild 4 kuralı: Stack varken challenge yapılır mı? 
+                // Basitlik için: Challenge kaybeden stack + 4 yer.
+                drawAmount = room.drawStack; 
+                room.drawStack = 0; // Stack patladı
             }
+            
+            addLog(room, `${victim.nickname} +4'ü kabul etti.`);
+            drawCards(room, victim, drawAmount);
             advanceTurn(room); 
         } else {
-            // Challenge
             const hasColor = attacker.hand.some(c => c.color === oldColor && c.color !== 'black');
             if (hasColor) {
-                // YAKALANDI
-                addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} blöf yapmıştı!`);
-                if (room.mode === 'UNO_X') {
-                    // UNO X: Attacker tüm stack'i çeker
-                    drawCards(room, attacker, room.drawStack);
-                    room.drawStack = 0;
-                } else {
-                    drawCards(room, attacker, 4);
-                }
-                // Sıra mağdurda kalır, oynamaz, geçer (Klasik kural: challenge başarılıysa sıra geçer mi? Evet geçer ama mağdur kart çekmez.)
-                // Basitlik için sıra mağdurda kalsın, kart çekmedi.
-                // Düzeltme: Mattel kuralına göre blöfçü 4 çeker, sıra mağdura gelmez mi? Hayır sıra devam eder.
-                // Biz burada sırayı geçirelim.
-                advanceTurn(room); 
+                addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} blöf yapmıştı! (Ceza: 4 Kart)`);
+                drawCards(room, attacker, 4);
+                // Stack victima geri döner mi? UNO X karmaşıklaşır. Basit tutalım.
+                // Sıra atlamadan devam etsin
+                // attacker ceza yedi, oyun victimden devam eder (kart atmadan)
+                // advanceTurn(room); // Kurala göre değişir, burada basitlik için sıra geçer
             } else {
-                // TEMİZ
-                if (room.mode === 'UNO_X') {
-                    addLog(room, `⚖️ TEMİZ! ${victim.nickname} ekstradan 2 kart daha çekiyor!`);
-                    drawCards(room, victim, room.drawStack + 2);
-                    room.drawStack = 0;
-                } else {
-                    addLog(room, `⚖️ TEMİZ! ${victim.nickname} 6 kart çekiyor!`);
-                    drawCards(room, victim, 6);
-                }
+                addLog(room, `⚖️ TEMİZ! ${attacker.nickname} dürüsttü. ${victim.nickname} 6 kart çekiyor!`);
+                let penalty = 6;
+                if(room.mode === 'UNO_X' && room.drawStack > 4) penalty = room.drawStack + 2;
+                
+                drawCards(room, victim, penalty);
+                room.drawStack = 0;
                 advanceTurn(room);
             }
         }
@@ -532,35 +514,6 @@ io.on('connection', (socket) => {
         room.pendingChallenge = null;
         broadcastGameState(roomId);
         startTurnTimer(room);
-    });
-
-    socket.on('chatMessage', ({ message, targetId }) => {
-        const roomId = getPlayerRoomId(socket.id);
-        if (!roomId) return;
-        const room = rooms.get(roomId);
-        const sender = room.players.find(p => p.id === socket.id);
-        if(!sender) return;
-
-        const chatData = {
-            sender: sender.nickname,
-            avatar: sender.avatar,
-            msg: message,
-            type: 'public',
-            time: new Date().toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})
-        };
-
-        if (targetId === 'all') {
-            chatData.type = 'public';
-            io.to(roomId).emit('chatBroadcast', chatData);
-        } else {
-            const targetSocket = io.sockets.sockets.get(targetId);
-            if(targetSocket) {
-                chatData.type = 'private';
-                chatData.to = targetSocket.data.nickname;
-                socket.emit('chatBroadcast', { ...chatData, isMe: true });
-                targetSocket.emit('chatBroadcast', { ...chatData, isMe: false });
-            }
-        }
     });
 
     socket.on('returnToLobby', () => {
@@ -602,56 +555,67 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- OYUN MANTIĞI & EFEKTLER ---
+// --- OYUN MANTIĞI ---
 
 function handleCardEffect(room, card, player, oldColorForChallenge) {
     let skipNext = false;
 
-    if (card.value === 'skip') { 
-        skipNext = true; 
-        addLog(room, "Sıra atladı!"); 
-    } 
-    else if (card.value === 'reverse') {
-        room.direction *= -1;
-        addLog(room, "Yön değişti!");
-        if (room.players.length === 2) { skipNext = true; } 
-    }
-    else if (card.value === 'draw2') {
-        if (room.mode === 'UNO_X') {
-            // UNO X: Stack'e ekle, sırayı geçir (Çektirme!)
+    // --- UNO X STACKING LOGIC ---
+    if (room.mode === 'UNO_X') {
+        if (card.value === 'draw2') {
             room.drawStack += 2;
-            addLog(room, `⛓️ STACK! Toplam Ceza: ${room.drawStack} Kart`);
-            // Sıra bir sonraki oyuncuya geçer, o oyuncu ya stack yapar ya çeker
-        } else {
-            // KLASİK: Hemen çektir ve atla
+            addLog(room, `🔥 YANMAZ! Kart Eklendi. Toplam Ceza: +${room.drawStack}`);
+            // Sıra sonraki oyuncuya geçer, o da ekleme yapmalı veya çekmeli
+        } 
+        else if (card.value === 'wild4') {
+            room.drawStack += 4;
+            addLog(room, `🔥 YANMAZ! Kart Eklendi. Toplam Ceza: +${room.drawStack}`);
+            // Wild 4 challenge normalde burada devreye girer ama stack modunda challenge
+            // genellikle devre dışı bırakılır veya sadece son kartta yapılır.
+            // Basitlik ve akış için UNO X'te Wild 4 direkt stack'e eklenir, challenge sorulmaz (Hızlı mod)
+            // Ancak Klasik Challenge kodu aşağıda, UNO X için onu atlayacağız.
+        } 
+        else if (card.value === 'skip') {
+            skipNext = true;
+            addLog(room, "Sıra atladı!");
+        }
+        else if (card.value === 'reverse') {
+            room.direction *= -1;
+            addLog(room, "Yön değişti!");
+            if (room.players.length === 2) skipNext = true;
+        }
+    } 
+    // --- CLASSIC LOGIC ---
+    else {
+        if (card.value === 'skip') { 
+            skipNext = true; 
+            addLog(room, "Sıra atladı!"); 
+        } 
+        else if (card.value === 'reverse') {
+            room.direction *= -1;
+            addLog(room, "Yön değişti!");
+            if (room.players.length === 2) { skipNext = true; } 
+        }
+        else if (card.value === 'draw2') {
             const next = getNextPlayer(room);
             drawCards(room, next, 2);
             addLog(room, `${next.nickname} +2 yedi!`);
-            skipNext = true;
+            skipNext = true; // Klasikte +2 yiyen oynayamaz
         }
-    }
-    else if (card.value === 'wild4') {
-        if (room.mode === 'UNO_X') {
-            room.drawStack += 4;
-            addLog(room, `⛓️ STACK! Toplam Ceza: ${room.drawStack} Kart`);
+        else if (card.value === 'wild4') {
+            const nextIdx = getNextPlayerIndex(room);
+            const nextPlayer = room.players[nextIdx];
+            
+            room.pendingChallenge = { 
+                attackerId: player.id, 
+                victimId: nextPlayer.id, 
+                oldColor: oldColorForChallenge 
+            };
+            
+            io.to(nextPlayer.id).emit('challengePrompt', { attacker: player.nickname });
+            broadcastGameState(room.id);
+            return; // Challenge bekleniyor, tur ilerlemez
         }
-        
-        const nextIdx = getNextPlayerIndex(room);
-        const nextPlayer = room.players[nextIdx];
-        
-        // UNO X'de de, Klasikte de Challenge hakkı vardır
-        room.pendingChallenge = { 
-            attackerId: player.id, 
-            victimId: nextPlayer.id, 
-            oldColor: oldColorForChallenge 
-        };
-        
-        io.to(nextPlayer.id).emit('challengePrompt', { 
-            attacker: player.nickname,
-            stackAmount: room.mode === 'UNO_X' ? room.drawStack : 4
-        });
-        broadcastGameState(room.id);
-        return; 
     }
 
     if (player.hand.length === 0) {
@@ -684,11 +648,14 @@ function startTurnTimer(room) {
             room.pendingDrawAction = null;
             advanceTurn(room);
         } else {
-            // UNO X: Stack varsa onu çeker
-            const penalty = (room.mode === 'UNO_X' && room.drawStack > 0) ? room.drawStack : 1;
-            drawCards(room, currentPlayer, penalty);
-            room.drawStack = 0; // Stack reset
-            addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, ${penalty} kart çekti.`);
+            // UNO X Stack varsa onu çeker
+            let count = 1;
+            if(room.mode === 'UNO_X' && room.drawStack > 0) {
+                count = room.drawStack;
+                room.drawStack = 0;
+            }
+            drawCards(room, currentPlayer, count);
+            addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, kart çekti.`);
             advanceTurn(room);
         }
         
@@ -780,7 +747,12 @@ function getPlayerRoomId(socketId) {
 }
 
 function addLog(room, msg) {
-    io.to(room.id).emit('chatBroadcast', { sender: 'SİSTEM', msg: msg, type: 'log', time: '' });
+    io.to(room.id).emit('chatBroadcast', {
+        sender: 'SİSTEM',
+        msg: msg,
+        type: 'log',
+        time: ''
+    });
     room.logs.push(msg);
     if(room.logs.length > 6) room.logs.shift();
 }
@@ -802,8 +774,6 @@ function broadcastGameState(roomId) {
                 isHost: (p.id === room.hostId),
                 gameState: room.gameState,
                 playerCount: room.players.length,
-                mode: room.mode,
-                drawStack: room.drawStack, // İstemciye stack bilgisini gönder
                 players: room.players.map(pl => ({ 
                     id: pl.id, 
                     nickname: pl.nickname, 
@@ -820,7 +790,9 @@ function broadcastGameState(roomId) {
                 isMyTurn: room.players[room.turnIndex].id === p.id,
                 turnDeadline: room.turnDeadline,
                 pendingChallenge: !!room.pendingChallenge,
-                pendingDrawAction: room.pendingDrawAction && room.pendingDrawAction.playerId === p.id
+                pendingDrawAction: room.pendingDrawAction && room.pendingDrawAction.playerId === p.id,
+                mode: room.mode,
+                drawStack: room.drawStack
             });
         }
     });
