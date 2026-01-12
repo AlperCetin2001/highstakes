@@ -335,6 +335,7 @@ io.on('connection', (socket) => {
         room.discardPile = [];
         room.pendingChallenge = null;
         room.logs = [];
+        room.turnDeadline = 0; // Süreyi sıfırla
         
         io.to(roomId).emit('gameReset', { roomId });
         broadcastGameState(roomId);
@@ -428,24 +429,21 @@ function resetTurnTimer(room) { if(room.timer) clearTimeout(room.timer); }
 
 function finishGame(room, winner) {
     if(room.timer) clearTimeout(room.timer);
+    room.turnDeadline = 0; // SÜRE BİTTİ
     
     let roundScore = 0;
-    // Diğer oyuncuların elindeki kartların toplamını hesapla
     room.players.forEach(p => {
         if (p.id !== winner.id) {
             p.hand.forEach(c => roundScore += c.score);
         }
     });
 
-    // Kazanan oyuncunun toplam skorunu güncelle
     if (!winner.totalScore) winner.totalScore = 0;
     winner.totalScore += roundScore;
 
-    // Oyuncu listesindeki kazananı da güncelle
     const winnerInList = room.players.find(p => p.id === winner.id);
     if(winnerInList) winnerInList.totalScore = winner.totalScore;
     
-    // Skora göre sırala
     const sortedPlayers = [...room.players].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
 
     io.to(room.id).emit('gameOver', { 
@@ -453,6 +451,9 @@ function finishGame(room, winner) {
         score: roundScore,
         players: sortedPlayers
     });
+    
+    // Broadcast one last time to clear timers on client
+    broadcastGameState(room.id);
 }
 
 function joinRoomHandler(socket, roomId, nickname, avatar) {
