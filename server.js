@@ -14,9 +14,204 @@ const io = new Server(server, {
 const rooms = new Map();
 
 // --- YARDIMCI FONKSİYONLAR ---
-
 function generateRoomId() {
     return Math.random().toString(36).substring(2, 7).toUpperCase();
+}
+
+function createClassicDeck() {
+    const colors = ['red', 'blue', 'green', 'yellow'];
+    const deck = [];
+
+    colors.forEach(color => {
+        deck.push({ 
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: '0', type: 'number', score: 0 }
+            }
+        });
+        
+        for (let i = 1; i <= 9; i++) {
+            deck.push({ 
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: i.toString(), type: 'number', score: i }
+                }
+            });
+            deck.push({ 
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: i.toString(), type: 'number', score: i }
+                }
+            });
+        }
+        
+        ['skip', 'reverse', 'draw2'].forEach(val => {
+            deck.push({ 
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: val, type: 'action', score: 20 }
+                }
+            });
+            deck.push({ 
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: val, type: 'action', score: 20 }
+                }
+            });
+        });
+    });
+
+    for (let i = 0; i < 4; i++) {
+        deck.push({ 
+            id: Math.random().toString(36),
+            sides: {
+                light: { color: 'black', value: 'wild', type: 'wild', score: 50 }
+            }
+        });
+        deck.push({ 
+            id: Math.random().toString(36),
+            sides: {
+                light: { color: 'black', value: 'wild4', type: 'wild', score: 50 }
+            }
+        });
+    }
+
+    return shuffle(deck);
+}
+
+function createFlipDeck() {
+    const lightColors = ['red', 'blue', 'green', 'yellow'];
+    const darkColors = ['pink', 'teal', 'orange', 'purple'];
+    const deck = [];
+
+    // Light side numbers (0-9)
+    lightColors.forEach(color => {
+        // Number 0 (one per color)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: '0', type: 'number', score: 0 },
+                dark: { color: darkColors[lightColors.indexOf(color)], value: '0', type: 'number', score: 0 }
+            }
+        });
+        
+        // Numbers 1-9 (two each)
+        for (let i = 1; i <= 9; i++) {
+            deck.push({
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: i.toString(), type: 'number', score: i },
+                    dark: { color: darkColors[lightColors.indexOf(color)], value: i.toString(), type: 'number', score: i }
+                }
+            });
+            deck.push({
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color, value: i.toString(), type: 'number', score: i },
+                    dark: { color: darkColors[lightColors.indexOf(color)], value: i.toString(), type: 'number', score: i }
+                }
+            });
+        }
+    });
+
+    // Light side action cards (Skip, Reverse, Draw One)
+    lightColors.forEach(color => {
+        const darkColor = darkColors[lightColors.indexOf(color)];
+        
+        // Skip (2 each)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'skip', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'skip', type: 'action', score: 20 }
+            }
+        });
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'skip', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'skip', type: 'action', score: 20 }
+            }
+        });
+        
+        // Reverse (2 each)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'reverse', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'reverse', type: 'action', score: 20 }
+            }
+        });
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'reverse', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'reverse', type: 'action', score: 20 }
+            }
+        });
+        
+        // Draw One (replaces Draw Two in UNO Flip) - 2 each
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'draw1', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'draw5', type: 'action', score: 20 }
+            }
+        });
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color, value: 'draw1', type: 'action', score: 20 },
+                dark: { color: darkColor, value: 'draw5', type: 'action', score: 20 }
+            }
+        });
+    });
+
+    // Dark side special cards (Skip Everyone, Wild Draw Color)
+    darkColors.forEach(color => {
+        // Skip Everyone (1 each)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color: lightColors[darkColors.indexOf(color)], value: 'skip', type: 'action', score: 20 },
+                dark: { color, value: 'skipall', type: 'action', score: 40 }
+            }
+        });
+    });
+
+    // Wild cards
+    for (let i = 0; i < 4; i++) {
+        // Wild (Light) / Wild (Dark)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color: 'black', value: 'wild', type: 'wild', score: 50 },
+                dark: { color: 'dark-black', value: 'wild', type: 'wild', score: 50 }
+            }
+        });
+        
+        // Wild Draw Four (Light) / Wild Draw Color (Dark)
+        deck.push({
+            id: Math.random().toString(36),
+            sides: {
+                light: { color: 'black', value: 'wild4', type: 'wild', score: 50 },
+                dark: { color: 'dark-black', value: 'wilddrawcolor', type: 'wild', score: 50 }
+            }
+        });
+        
+        // FLIP cards (2 total in deck)
+        if (i < 2) {
+            deck.push({
+                id: Math.random().toString(36),
+                sides: {
+                    light: { color: 'black', value: 'flip', type: 'action', score: 20 },
+                    dark: { color: 'dark-black', value: 'flip', type: 'action', score: 20 }
+                }
+            });
+        }
+    }
+
+    return shuffle(deck);
 }
 
 function shuffle(array) {
@@ -27,135 +222,7 @@ function shuffle(array) {
     return array;
 }
 
-// --- KART OLUŞTURMA MANTIĞI ---
-
-// Klasik Mod Destesi
-function createClassicDeck() {
-    const colors = ['red', 'blue', 'green', 'yellow'];
-    const deck = [];
-
-    colors.forEach(color => {
-        // 0 kartı
-        deck.push(createCardObj(color, '0', 'number', 0));
-        // 1-9 ve Aksiyonlar (x2)
-        for (let i = 1; i <= 9; i++) {
-            deck.push(createCardObj(color, i.toString(), 'number', i));
-            deck.push(createCardObj(color, i.toString(), 'number', i));
-        }
-        ['skip', 'reverse', 'draw2'].forEach(val => {
-            deck.push(createCardObj(color, val, 'action', 20));
-            deck.push(createCardObj(color, val, 'action', 20));
-        });
-    });
-
-    // Jokerler (x4)
-    for (let i = 0; i < 4; i++) {
-        deck.push(createCardObj('black', 'wild', 'wild', 50));
-        deck.push(createCardObj('black', 'wild4', 'wild', 50));
-    }
-
-    return shuffle(deck);
-}
-
-// UNO FLIP Destesi
-function createFlipDeck() {
-    const deck = [];
-    
-    // Light Side: Red, Blue, Green, Yellow
-    // Dark Side: Pink, Teal, Orange, Purple
-    
-    const lightColors = ['red', 'blue', 'green', 'yellow'];
-    const darkColors = ['pink', 'teal', 'orange', 'purple'];
-
-    // Flip modunda kartlar birbirine bağlıdır. Rastgele eşleştirme yerine
-    // dengeli bir dağılım için döngüyle oluşturup eşleştireceğiz.
-    
-    // Basitlik için her Light kartına karşılık rastgele bir Dark özellik atayacağız
-    // ama renkleri sıralı tutacağız.
-
-    let lightCards = [];
-    let darkCards = [];
-
-    // --- LIGHT SIDE GENERATION ---
-    lightColors.forEach(color => {
-        lightCards.push({ color, value: '1', type: 'number', score: 1 }); // +2 yerine +1 (Draw One) var Flip'te ama 0-9 sayıları da var.
-        // Flip Light Kuralları: 1-9, Draw 1, Reverse, Skip, Flip, Wild, Wild Draw 2
-        // Not: Klasik Flip'te +2 yoktur, "Draw 1" vardır.
-        
-        // 1-9 (x2)
-        for(let i=1; i<=9; i++) {
-            lightCards.push({ color, value: i.toString(), type: 'number', score: i });
-            lightCards.push({ color, value: i.toString(), type: 'number', score: i });
-        }
-        // Action: Draw 1, Reverse, Skip (x2)
-        ['draw1', 'reverse', 'skip'].forEach(val => {
-            lightCards.push({ color, value: val, type: 'action', score: 20 });
-            lightCards.push({ color, value: val, type: 'action', score: 20 });
-        });
-        // Flip Kartı (x2 per color)
-        lightCards.push({ color, value: 'flip', type: 'action', score: 20 });
-        lightCards.push({ color, value: 'flip', type: 'action', score: 20 });
-    });
-    // Wild Cards Light: Wild, Wild Draw 2
-    for(let i=0; i<4; i++) {
-        lightCards.push({ color: 'black', value: 'wild', type: 'wild', score: 40 });
-        lightCards.push({ color: 'black', value: 'wild_draw2', type: 'wild', score: 50 });
-    }
-
-    // --- DARK SIDE GENERATION ---
-    darkColors.forEach(color => {
-        // 1-9 (x2)
-        for(let i=1; i<=9; i++) {
-            darkCards.push({ color, value: i.toString(), type: 'number', score: i });
-            darkCards.push({ color, value: i.toString(), type: 'number', score: i });
-        }
-        // Action: Draw 5, Reverse, Skip Everyone (x2)
-        ['draw5', 'reverse', 'skip_everyone'].forEach(val => {
-            darkCards.push({ color, value: val, type: 'action', score: 20 });
-            darkCards.push({ color, value: val, type: 'action', score: 20 });
-        });
-        // Flip Kartı (x2)
-        darkCards.push({ color, value: 'flip', type: 'action', score: 20 });
-        darkCards.push({ color, value: 'flip', type: 'action', score: 20 });
-    });
-    // Wild Cards Dark: Wild, Wild Draw Color
-    for(let i=0; i<4; i++) {
-        darkCards.push({ color: 'black', value: 'wild', type: 'wild', score: 40 });
-        darkCards.push({ color: 'black', value: 'wild_draw_color', type: 'wild', score: 60 });
-    }
-
-    // Kart sayılarını eşitlemek ve karıştırmak için
-    lightCards = shuffle(lightCards);
-    darkCards = shuffle(darkCards);
-
-    // Light ve Dark kartlarını tek bir objede birleştir
-    const minLen = Math.min(lightCards.length, darkCards.length);
-    for(let i=0; i<minLen; i++) {
-        deck.push({
-            id: Math.random().toString(36),
-            sides: {
-                light: lightCards[i],
-                dark: darkCards[i]
-            }
-        });
-    }
-
-    return shuffle(deck);
-}
-
-// Yardımcı: Klasik kartı yeni yapıya çevirir
-function createCardObj(color, value, type, score) {
-    return {
-        id: Math.random().toString(36),
-        sides: {
-            light: { color, value, type, score },
-            dark: { color, value, type, score } // Klasik modda dark kullanılmaz ama hata vermemesi için kopyalıyoruz
-        }
-    };
-}
-
 // --- SOCKET MANTIĞI ---
-
 io.on('connection', (socket) => {
     
     const queryName = socket.handshake.query.nickname;
@@ -169,9 +236,9 @@ io.on('connection', (socket) => {
         const list = Array.from(rooms.values()).map(r => ({ 
             id: r.id, 
             name: r.name, 
-            mode: r.gameMode,
             count: r.players.length, 
-            status: r.gameState 
+            status: r.gameState,
+            gameMode: r.gameMode
         }));
         socket.emit('roomList', list);
     });
@@ -181,27 +248,26 @@ io.on('connection', (socket) => {
         socket.data.avatar = avatar;
 
         const roomId = generateRoomId();
-        const validMode = (gameMode === 'flip') ? 'flip' : 'classic';
-
         const room = {
             id: roomId,
             name: `${nickname}'in Odası`,
-            gameMode: validMode, // 'classic' or 'flip'
             hostId: socket.id,
             players: [],
             gameState: 'LOBBY',
+            gameMode: gameMode || 'classic',
             deck: [],
             discardPile: [],
             turnIndex: 0,
             direction: 1,
-            currentSide: 'light', // 'light' or 'dark'
             currentColor: null,
+            currentSide: 'light', // 'light' or 'dark'
             logs: [],
             unoCallers: new Set(),
             pendingChallenge: null,
             pendingDrawAction: null,
             timer: null,
-            turnDeadline: 0
+            turnDeadline: 0,
+            pendingWildDrawColor: null // For Wild Draw Color card
         };
         rooms.set(roomId, room);
         joinRoomHandler(socket, roomId, nickname, avatar);
@@ -252,13 +318,10 @@ io.on('connection', (socket) => {
                 totalScore: 0
             };
             
-            // Eğer oyun oynanıyorsa kart ver
-            if (room.gameState === 'PLAYING') {
-                if (room.deck.length < 7) { 
-                    room.deck = (room.gameMode === 'flip') ? createFlipDeck() : createClassicDeck(); 
-                }
-                newPlayer.hand = room.deck.splice(0, 7);
+            if (room.deck.length < 7) { 
+                room.deck = room.gameMode === 'flip' ? createFlipDeck() : createClassicDeck();
             }
+            newPlayer.hand = room.deck.splice(0, 7);
             
             room.players.push(newPlayer);
             addLog(room, `Yeni oyuncu katıldı: ${nickname}`);
@@ -279,15 +342,16 @@ io.on('connection', (socket) => {
         }
 
         room.gameState = 'PLAYING';
-        room.deck = (room.gameMode === 'flip') ? createFlipDeck() : createClassicDeck();
+        room.deck = room.gameMode === 'flip' ? createFlipDeck() : createClassicDeck();
         room.discardPile = [];
         room.direction = 1;
         room.turnIndex = 0;
-        room.currentSide = 'light'; // Reset to light
+        room.currentSide = 'light';
         room.unoCallers.clear();
         room.logs = [];
         room.pendingChallenge = null;
         room.pendingDrawAction = null;
+        room.pendingWildDrawColor = null;
         
         room.players.forEach(p => { 
             p.hand = room.deck.splice(0, 7); 
@@ -295,33 +359,55 @@ io.on('connection', (socket) => {
             p.hasUno = false;
         });
 
-        // İlk kartı aç
+        // --- İLK KART ---
         let first;
         do {
             first = room.deck.pop();
-            // Wild Draw 4 veya Wild Draw Color gelirse geri at (basitlik için)
-            const sideData = first.sides[room.currentSide];
-            if (sideData.value === 'wild4' || sideData.value === 'wild_draw_color' || sideData.value === 'wild_draw2') {
-                room.deck.unshift(first);
+            // Eğer Wild Draw 4 veya Wild Draw Color çıkarsa, desteye geri koy
+            const firstActive = getActiveSide(first, room.currentSide);
+            if (firstActive.value === 'wild4' || firstActive.value === 'wilddrawcolor') {
+                room.deck.push(first);
                 room.deck = shuffle(room.deck);
-                first = null;
             }
-        } while (!first);
+        } while (firstActive.value === 'wild4' || firstActive.value === 'wilddrawcolor');
         
         room.discardPile.push(first);
-        const activeFirst = first.sides[room.currentSide];
         
-        // İlk kart rengi
-        if (activeFirst.color === 'black') {
-            room.currentColor = null; 
+        const firstActive = getActiveSide(first, room.currentSide);
+        if (firstActive.color === 'black' || firstActive.color === 'dark-black') {
+            room.currentColor = null;
             addLog(room, "Joker açıldı! İlk oyuncu rengi belirliyor.");
         } else {
-            room.currentColor = activeFirst.color;
+            room.currentColor = firstActive.color;
         }
 
-        // Başlangıç kartı etkileri
-        handleInitialCardEffect(room, activeFirst);
+        // İlk kart etkileri
+        if (firstActive.value === 'skip') {
+            addLog(room, "Başlangıçta Engel! İlk oyuncu atlandı.");
+            advanceTurn(room);
+        } else if (firstActive.value === 'reverse') {
+            room.direction *= -1;
+            addLog(room, "Başlangıçta Yön Değişti!");
+            if (room.players.length === 2) {
+                advanceTurn(room); 
+            } else {
+                room.turnIndex = room.players.length - 1;
+            }
+        } else if (firstActive.value === 'draw2' || firstActive.value === 'draw1') {
+            const firstPlayer = room.players[room.turnIndex];
+            const drawCount = firstActive.value === 'draw2' ? 2 : 1;
+            addLog(room, `Başlangıçta +${drawCount}! ${firstPlayer.nickname} ${drawCount} kart çekiyor ve sıra geçiyor.`);
+            drawCards(room, firstPlayer, drawCount);
+            advanceTurn(room);
+        } else if (firstActive.value === 'draw5') {
+            const firstPlayer = room.players[room.turnIndex];
+            addLog(room, `Başlangıçta +5! ${firstPlayer.nickname} 5 kart çekiyor ve sıra geçiyor.`);
+            drawCards(room, firstPlayer, 5);
+            advanceTurn(room);
+        }
         
+        // Tüm oyunculara side değişikliğini bildir
+        io.to(room.id).emit('sideChanged', { newSide: room.currentSide, playerName: null });
         startTurnTimer(room);
         broadcastGameState(roomId);
     });
@@ -336,31 +422,72 @@ io.on('connection', (socket) => {
         if (room.players[room.turnIndex].id !== socket.id) return;
         if (room.pendingChallenge) return;
         if (room.pendingDrawAction) return;
+        if (room.pendingWildDrawColor) return;
 
         resetTurnTimer(room);
         
-        // Deste kontrolü
-        ensureDeck(room);
-        if(room.deck.length === 0) return; 
+        // Wild Draw Color durumunda
+        if (room.pendingWildDrawColor && room.pendingWildDrawColor.victimId === socket.id) {
+            let drawnCard = null;
+            if(room.deck.length === 0 && room.discardPile.length > 1) {
+                const top = room.discardPile.pop();
+                room.deck = shuffle(room.discardPile);
+                room.discardPile = [top];
+            }
+            if(room.deck.length > 0) drawnCard = room.deck.pop();
+            
+            if (drawnCard) {
+                player.hand.push(drawnCard);
+                const activeCard = getActiveSide(drawnCard, room.currentSide);
+                
+                // Çekilen kart istenen renkte mi?
+                if (activeCard.color === room.pendingWildDrawColor.chosenColor) {
+                    // Doğru renk bulundu, ceza sona erdi
+                    addLog(room, `${player.nickname} doğru rengi buldu! ${room.pendingWildDrawColor.drawCount} kart çekti.`);
+                    room.pendingWildDrawColor = null;
+                    advanceTurn(room);
+                } else {
+                    // Yanlış renk, çekmeye devam
+                    addLog(room, `${player.nickname} ${activeCard.color} renginde kart çekti. Doğru renk ${room.pendingWildDrawColor.chosenColor}. Çekmeye devam...`);
+                    room.pendingWildDrawColor.drawCount++;
+                    
+                    // Yeni kart çekmesi için tekrar çağır
+                    setTimeout(() => {
+                        socket.emit('notification', { msg: `Doğru rengi bulana kadar çekmeye devam et! (${room.pendingWildDrawColor.drawCount}. kart)` });
+                        broadcastGameState(roomId);
+                    }, 1000);
+                }
+            }
+            broadcastGameState(roomId);
+            return;
+        }
+        
+        // Normal kart çekme
+        let drawnCard = null;
+        if(room.deck.length === 0 && room.discardPile.length > 1) {
+             const top = room.discardPile.pop();
+             room.deck = shuffle(room.discardPile);
+             room.discardPile = [top];
+        }
+        if(room.deck.length > 0) drawnCard = room.deck.pop();
+        else return;
 
-        const drawnCard = room.deck.pop();
         player.hand.push(drawnCard);
         addLog(room, `${player.nickname} kart çekti.`);
 
-        // Çekilen kart oynanabilir mi?
-        const activeSide = drawnCard.sides[room.currentSide];
-        const topCardObj = room.discardPile[room.discardPile.length - 1];
-        const topActive = topCardObj.sides[room.currentSide];
-
+        const top = room.discardPile[room.discardPile.length - 1];
+        const topActive = getActiveSide(top, room.currentSide);
+        const drawnActive = getActiveSide(drawnCard, room.currentSide);
+        
         let isPlayable = false;
-        if (activeSide.color === 'black') isPlayable = true;
-        else if (room.currentColor && activeSide.color === room.currentColor) isPlayable = true;
-        else if (activeSide.value === topActive.value) isPlayable = true;
+        if (drawnActive.color === 'black' || drawnActive.color === 'dark-black') isPlayable = true;
+        else if (room.currentColor && drawnActive.color === room.currentColor) isPlayable = true;
+        else if (drawnActive.value === topActive.value) isPlayable = true;
 
         if (isPlayable) {
             room.pendingDrawAction = { playerId: player.id, cardId: drawnCard.id };
             socket.emit('drawDecisionRequired', { 
-                card: activeSide, 
+                card: drawnCard, 
                 message: "Oynanabilir bir kart çektin! Oynamak ister misin?" 
             });
             broadcastGameState(roomId);
@@ -373,6 +500,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- ÇEKİLEN KARTI OYNAMA/PAS GEÇME ---
     socket.on('handleDrawDecision', ({ action, chosenColor }) => {
         const roomId = getPlayerRoomId(socket.id);
         if (!roomId) return;
@@ -390,15 +518,18 @@ io.on('connection', (socket) => {
             player.hand.splice(cardIndex, 1);
             room.discardPile.push(card);
             
-            const activeCard = card.sides[room.currentSide];
+            const activeCard = getActiveSide(card, room.currentSide);
             const oldColor = room.currentColor;
-            room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
+            room.currentColor = (activeCard.color === 'black' || activeCard.color === 'dark-black') ? chosenColor : activeCard.color;
             
+            if (player.hand.length === 1) {
+                // Uno demediyse "unsafe" durum
+            }
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
 
             addLog(room, `${player.nickname} çektiği kartı oynadı: ${formatCardName(activeCard)}`);
             room.pendingDrawAction = null;
-            handleCardEffect(room, activeCard, player, oldColor);
+            handleCardEffect(room, card, player, oldColor);
 
         } else {
             addLog(room, `${player.nickname} pas geçti.`);
@@ -409,47 +540,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- KART OYNAMA ---
-    socket.on('playCard', ({ cardIndex, chosenColor }) => {
-        const roomId = getPlayerRoomId(socket.id);
-        if (!roomId) return;
-        const room = rooms.get(roomId);
-        const player = room.players.find(p => p.id === socket.id);
-
-        if (room.players[room.turnIndex].id !== socket.id) return;
-        if (room.pendingChallenge) return;
-        if (room.pendingDrawAction) return;
-        if (!player.hand[cardIndex]) return;
-
-        const card = player.hand[cardIndex];
-        const activeCard = card.sides[room.currentSide];
-        const topCardObj = room.discardPile[room.discardPile.length - 1];
-        const topActive = topCardObj.sides[room.currentSide];
-        
-        let isValid = false;
-        if (activeCard.color === 'black') isValid = true;
-        else if (activeCard.color === room.currentColor) isValid = true;
-        else if (activeCard.value === topActive.value) isValid = true;
-        if (room.currentColor === null && activeCard.color !== 'black') isValid = true;
-
-        if (isValid) {
-            resetTurnTimer(room);
-            player.hand.splice(cardIndex, 1);
-            room.discardPile.push(card);
-            
-            const oldColorForChallenge = room.currentColor;
-            room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
-
-            if (player.hand.length !== 1) room.unoCallers.delete(player.id);
-
-            addLog(room, `${player.nickname} attı: ${formatCardName(activeCard)}`);
-            handleCardEffect(room, activeCard, player, oldColorForChallenge);
-        } else {
-            socket.emit('error', 'Bu kartı oynayamazsın!');
-        }
-    });
-
-    // --- CHAT & DİĞERLERİ ---
     socket.on('chatMessage', ({ message, targetId }) => {
         const roomId = getPlayerRoomId(socket.id);
         if (!roomId) return;
@@ -479,6 +569,47 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('playCard', ({ cardIndex, chosenColor }) => {
+        const roomId = getPlayerRoomId(socket.id);
+        if (!roomId) return;
+        const room = rooms.get(roomId);
+        const player = room.players.find(p => p.id === socket.id);
+
+        if (room.players[room.turnIndex].id !== socket.id) return;
+        if (room.pendingChallenge) return;
+        if (room.pendingDrawAction) return;
+        if (room.pendingWildDrawColor) return;
+        if (!player.hand[cardIndex]) return;
+
+        const card = player.hand[cardIndex];
+        const activeCard = getActiveSide(card, room.currentSide);
+        const top = room.discardPile[room.discardPile.length - 1];
+        const topActive = getActiveSide(top, room.currentSide);
+        
+        let isValid = false;
+        if (activeCard.color === 'black' || activeCard.color === 'dark-black') isValid = true;
+        else if (activeCard.color === room.currentColor) isValid = true;
+        else if (activeCard.value === topActive.value) isValid = true;
+        if (room.currentColor === null && activeCard.color !== 'black' && activeCard.color !== 'dark-black') isValid = true;
+
+        if (isValid) {
+            resetTurnTimer(room);
+            player.hand.splice(cardIndex, 1);
+            room.discardPile.push(card);
+            
+            const oldColorForChallenge = room.currentColor;
+            room.currentColor = (activeCard.color === 'black' || activeCard.color === 'dark-black') ? chosenColor : activeCard.color;
+
+            if (player.hand.length !== 1) room.unoCallers.delete(player.id);
+
+            addLog(room, `${player.nickname} attı: ${formatCardName(activeCard)}`);
+            handleCardEffect(room, card, player, oldColorForChallenge);
+        } else {
+            socket.emit('error', 'Bu kartı oynayamazsın!');
+        }
+    });
+
+    // --- UNO BİLDİRİMİ ---
     socket.on('callUno', () => {
         const roomId = getPlayerRoomId(socket.id);
         const room = rooms.get(roomId);
@@ -493,11 +624,13 @@ io.on('connection', (socket) => {
         }
     });
 
+    // --- UNO MEYDAN OKUMA ---
     socket.on('catchUnoFailure', () => {
         const roomId = getPlayerRoomId(socket.id);
         const room = rooms.get(roomId);
         if(!room) return;
-        
+        const challenger = room.players.find(p => p.id === socket.id);
+
         let caughtSomeone = false;
         room.players.forEach(p => {
             if (p.hand.length === 1 && !room.unoCallers.has(p.id)) {
@@ -507,8 +640,11 @@ io.on('connection', (socket) => {
             }
         });
 
-        if (caughtSomeone) broadcastGameState(roomId);
-        else socket.emit('error', 'Yakalanacak kimse yok!');
+        if (caughtSomeone) {
+            broadcastGameState(roomId);
+        } else {
+            socket.emit('error', 'Yakalanacak kimse yok!');
+        }
     });
 
     socket.on('challengeDecision', ({ decision }) => {
@@ -527,19 +663,14 @@ io.on('connection', (socket) => {
             drawCards(room, victim, 4);
             advanceTurn(room); 
         } else {
-            // Blöf kontrolü: Atanın elinde "oldColor" renginden (Siyah olmayan) kart var mıydı?
             const hasColor = attacker.hand.some(c => {
-                const side = c.sides[room.currentSide];
-                return side.color === oldColor && side.color !== 'black';
+                const activeCard = getActiveSide(c, room.currentSide);
+                return activeCard.color === oldColor && activeCard.color !== 'black' && activeCard.color !== 'dark-black';
             });
             
             if (hasColor) {
                 addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} blöf yapmıştı! (Ceza: 4 Kart)`);
                 drawCards(room, attacker, 4);
-                // Sıra kurbana gelmez, normal devam eder mi? Hayır, kurban çekmekten kurtulur.
-                // Kural: Meydan okuma başarılıysa, atan 4 çeker, kurban çekmez ve oynar.
-                // Ancak UNO basit kurallarda kurban oynar mı? Bizim akışta advanceTurn yapıp geçiyoruz.
-                // Burada kurban oynamalı aslında ama basitlik için pas geçireceğiz.
                 advanceTurn(room);
             } else {
                 addLog(room, `⚖️ TEMİZ! ${attacker.nickname} dürüsttü. ${victim.nickname} 6 kart çekiyor!`);
@@ -568,10 +699,13 @@ io.on('connection', (socket) => {
         room.discardPile = [];
         room.pendingChallenge = null;
         room.pendingDrawAction = null;
+        room.pendingWildDrawColor = null;
+        room.logs = [];
         room.turnDeadline = 0;
         room.currentSide = 'light';
         
         io.to(roomId).emit('gameReset', { roomId });
+        io.to(roomId).emit('sideChanged', { newSide: 'light', playerName: null });
         broadcastGameState(roomId);
     });
 
@@ -591,135 +725,97 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- OYUN MANTIĞI & EFEKTLER ---
-
-function handleInitialCardEffect(room, card) {
-    if (card.value === 'skip') {
-        addLog(room, "Başlangıçta Engel!");
-        advanceTurn(room);
-    } else if (card.value === 'reverse') {
-        room.direction *= -1;
-        addLog(room, "Başlangıçta Yön Değişti!");
-        if (room.players.length === 2) advanceTurn(room);
-        else room.turnIndex = room.players.length - 1;
-    } else if (card.value === 'draw2') {
-        const first = room.players[room.turnIndex];
-        drawCards(room, first, 2);
-        advanceTurn(room);
-    } else if (card.value === 'draw1') {
-        const first = room.players[room.turnIndex];
-        drawCards(room, first, 1);
-        advanceTurn(room);
-    } else if (card.value === 'draw5') {
-        const first = room.players[room.turnIndex];
-        drawCards(room, first, 5);
-        advanceTurn(room);
-    } else if (card.value === 'skip_everyone') {
-        // Dealer tekrar oynar (sıra değişmez)
-        addLog(room, "Herkes Atlandı! Sıra tekrar dağıtıcıda.");
-    }
-}
+// --- OYUN MANTIĞI ---
 
 function handleCardEffect(room, card, player, oldColorForChallenge) {
+    const activeCard = getActiveSide(card, room.currentSide);
     let skipNext = false;
-    let nextPlayer = getNextPlayer(room);
 
-    // --- GENEL EFEKTLER ---
-    if (card.value === 'flip') {
-        room.currentSide = (room.currentSide === 'light') ? 'dark' : 'light';
-        addLog(room, `🌀 DÜNYA DÖNDÜ! Taraf: ${room.currentSide.toUpperCase()}`);
-        io.to(room.id).emit('playSound', 'turn'); // Flip sesi
-        
-        // Flip sonrası, discard destesindeki en üst kart da döner.
-        // Yeni yüzün rengi geçerli renk olur.
-        const topCardObj = room.discardPile[room.discardPile.length - 1];
-        const newSide = topCardObj.sides[room.currentSide];
-        if (newSide.color === 'black') {
-             // Eğer dönen kart Wild ise, renk seçimi yapılamayacağı için (kimse seçmedi)
-             // genellikle oyuncu seçer ama burada basitlik için random veya mevcut renk korunur.
-             // Biz mevcut rengi koruyalım, ama eğer renk uyuşmazlığı varsa null yapalım.
-             // En güvenlisi: Oynayan oyuncu Flip attığı için renk onun attığı Flip kartının rengi oldu zaten, 
-             // ama Flip kartının kendisi de döndü.
-             // FLIP kartının her iki yüzü de renklidir (Wild değildir). 
-             // Ancak Discard'daki eski kartlar Wild olabilir.
-             // Sadece "current color" Flip kartının rengi olarak kalsın.
-        } else {
-             room.currentColor = newSide.color;
-        }
-    }
-
-    // --- KLASİK / LIGHT EFEKTLER ---
-    if (card.value === 'skip') { 
+    if (activeCard.value === 'skip') { 
         skipNext = true; 
         addLog(room, "Sıra atladı!"); 
     } 
-    else if (card.value === 'reverse') {
+    else if (activeCard.value === 'reverse') {
         room.direction *= -1;
         addLog(room, "Yön değişti!");
-        if (room.players.length === 2) skipNext = true; 
+        if (room.players.length === 2) { skipNext = true; } 
     }
-    else if (card.value === 'draw2') { // Klasik +2
-        drawCards(room, nextPlayer, 2);
-        addLog(room, `${nextPlayer.nickname} +2 yedi!`);
+    else if (activeCard.value === 'draw2') {
+        const next = getNextPlayer(room);
+        drawCards(room, next, 2);
+        addLog(room, `${next.nickname} +2 yedi!`);
         skipNext = true;
     }
-    else if (card.value === 'wild4') { // Klasik +4
-        room.pendingChallenge = { attackerId: player.id, victimId: nextPlayer.id, oldColor: oldColorForChallenge };
-        io.to(nextPlayer.id).emit('challengePrompt', { attacker: player.nickname });
-        broadcastGameState(room.id);
-        return; 
-    }
-    // --- FLIP LIGHT ÖZEL ---
-    else if (card.value === 'draw1') {
-        drawCards(room, nextPlayer, 1);
-        addLog(room, `${nextPlayer.nickname} +1 yedi!`);
+    else if (activeCard.value === 'draw1') {
+        const next = getNextPlayer(room);
+        drawCards(room, next, 1);
+        addLog(room, `${next.nickname} +1 yedi!`);
         skipNext = true;
     }
-    else if (card.value === 'wild_draw2') { // Wild Draw 2 (Light)
-        // Challenge yok, direkt +2 ve renk değişimi
-        drawCards(room, nextPlayer, 2);
-        addLog(room, `${nextPlayer.nickname} +2 yedi ve renk değişti!`);
+    else if (activeCard.value === 'draw5') {
+        const next = getNextPlayer(room);
+        drawCards(room, next, 5);
+        addLog(room, `${next.nickname} +5 yedi!`);
         skipNext = true;
     }
-
-    // --- FLIP DARK ÖZEL ---
-    else if (card.value === 'draw5') {
-        drawCards(room, nextPlayer, 5);
-        addLog(room, `💀 ${nextPlayer.nickname} +5 yedi!`);
-        skipNext = true;
-    }
-    else if (card.value === 'skip_everyone') {
-        addLog(room, "⛔ HERKESİ ATLA! Sıra tekrar sende.");
-        // advanceTurn çağırmıyoruz, timer'ı resetliyoruz.
-        // Ancak fonksiyon sonunda advanceTurn çağrılıyor.
-        // Bunu engellemek için return yapıp broadcast edelim.
-        if (player.hand.length === 0) { finishGame(room, player); return; }
+    else if (activeCard.value === 'skipall') {
+        // Skip Everyone: Herkes atlanır, atan tekrar oynar
+        addLog(room, `⏩ ${player.nickname} herkesi atladı! Tekrar oynayacak.`);
+        // Sıra değişmez, aynı oyuncu tekrar oynar
+        skipNext = false;
+        // Turu atlamayacağız, sadece log ekleyip broadcast yapacağız
         broadcastGameState(room.id);
         startTurnTimer(room);
         return;
     }
-    else if (card.value === 'wild_draw_color') {
-        // Hedef oyuncu, 'room.currentColor' rengini bulana kadar çeker.
-        // Bu işlem sunucuda anlık yapılır.
-        addLog(room, `🎨 ${nextPlayer.nickname}, ${room.currentColor.toUpperCase()} bulana kadar çekiyor!`);
-        let drawnCount = 0;
-        let found = false;
+    else if (activeCard.value === 'wild4') {
+        const nextIdx = getNextPlayerIndex(room);
+        const nextPlayer = room.players[nextIdx];
         
-        // Max 20 kart sınırı koyalım (sonsuz döngü önlemi)
-        while(!found && drawnCount < 20) {
-            ensureDeck(room);
-            if(room.deck.length === 0) break;
-            
-            const drawn = room.deck.pop();
-            nextPlayer.hand.push(drawn);
-            drawnCount++;
-            
-            if (drawn.sides[room.currentSide].color === room.currentColor) {
-                found = true;
-            }
+        room.pendingChallenge = { 
+            attackerId: player.id, 
+            victimId: nextPlayer.id, 
+            oldColor: oldColorForChallenge 
+        };
+        
+        io.to(nextPlayer.id).emit('challengePrompt', { attacker: player.nickname });
+        broadcastGameState(room.id);
+        return; 
+    }
+    else if (activeCard.value === 'wilddrawcolor') {
+        // Wild Draw Color: Sonraki oyuncu seçilen rengi bulana kadar çeker
+        const nextIdx = getNextPlayerIndex(room);
+        const nextPlayer = room.players[nextIdx];
+        
+        room.pendingWildDrawColor = {
+            victimId: nextPlayer.id,
+            chosenColor: room.currentColor,
+            drawCount: 0
+        };
+        
+        addLog(room, `🎨 ${player.nickname} ${room.currentColor} rengini seçti! ${nextPlayer.nickname} bu rengi bulana kadar çekecek.`);
+        broadcastGameState(room.id);
+        startTurnTimer(room);
+        return;
+    }
+    else if (activeCard.value === 'flip') {
+        // Flip kartı: Tarafları değiştir
+        room.currentSide = room.currentSide === 'light' ? 'dark' : 'light';
+        addLog(room, `🔄 ${player.nickname} oyunu ${room.currentSide === 'light' ? 'Aydınlık' : 'Karanlık'} tarafa çevirdi!`);
+        
+        // Tüm oyunculara side değişikliğini bildir
+        io.to(room.id).emit('sideChanged', { newSide: room.currentSide, playerName: player.nickname });
+        
+        // Flip sonrası normal devam et
+        if (player.hand.length === 0) {
+            finishGame(room, player);
+            return;
         }
-        addLog(room, `${nextPlayer.nickname} toplam ${drawnCount} kart çekti.`);
-        skipNext = true;
+        
+        advanceTurn(room);
+        broadcastGameState(room.id);
+        startTurnTimer(room);
+        return;
     }
 
     if (player.hand.length === 0) {
@@ -733,33 +829,38 @@ function handleCardEffect(room, card, player, oldColorForChallenge) {
     startTurnTimer(room);
 }
 
-function ensureDeck(room) {
-    if(room.deck.length === 0 && room.discardPile.length > 1) {
-        const top = room.discardPile.pop();
-        room.deck = shuffle(room.discardPile);
-        room.discardPile = [top];
-        addLog(room, "♻️ Deste karıştırıldı.");
-    }
-}
-
 function startTurnTimer(room) {
     if(room.timer) clearTimeout(room.timer);
     room.turnDeadline = Date.now() + 60000;
     
     room.timer = setTimeout(() => {
         if(!rooms.has(room.id)) return;
+        
         const currentPlayer = room.players[room.turnIndex];
-        if (!currentPlayer) { advanceTurn(room); broadcastGameState(room.id); return; }
+        if (!currentPlayer) {
+            advanceTurn(room);
+            broadcastGameState(room.id);
+            return;
+        }
 
-        if (room.pendingDrawAction) {
+        // Wild Draw Color durumunda süre dolduysa, ceza otomatik uygulansın
+        if (room.pendingWildDrawColor && room.pendingWildDrawColor.victimId === currentPlayer.id) {
+            addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, ${room.pendingWildDrawColor.drawCount} kart çekti.`);
+            room.pendingWildDrawColor = null;
+            advanceTurn(room);
+        }
+        // Karar bekliyorsa
+        else if (room.pendingDrawAction) {
             addLog(room, `⏳ ${currentPlayer.nickname} karar vermedi, pas geçildi.`);
             room.pendingDrawAction = null;
             advanceTurn(room);
         } else {
+            // Normal süresi dolduysa kart çek ve pas geç
             drawCards(room, currentPlayer, 1);
             addLog(room, `⏳ ${currentPlayer.nickname} süre doldu, kart çekti.`);
             advanceTurn(room);
         }
+        
         broadcastGameState(room.id);
         startTurnTimer(room);
     }, 60000);
@@ -770,17 +871,24 @@ function resetTurnTimer(room) { if(room.timer) clearTimeout(room.timer); }
 function finishGame(room, winner) {
     if(room.timer) clearTimeout(room.timer);
     room.turnDeadline = 0;
+    room.pendingWildDrawColor = null;
     
     let roundScore = 0;
     room.players.forEach(p => {
         if (p.id !== winner.id) {
-            p.hand.forEach(c => roundScore += c.sides[room.currentSide].score);
+            p.hand.forEach(c => {
+                const activeCard = getActiveSide(c, room.currentSide);
+                roundScore += activeCard.score;
+            });
         }
     });
 
     if (!winner.totalScore) winner.totalScore = 0;
     winner.totalScore += roundScore;
 
+    const winnerInList = room.players.find(p => p.id === winner.id);
+    if(winnerInList) winnerInList.totalScore = winner.totalScore;
+    
     const sortedPlayers = [...room.players].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
 
     io.to(room.id).emit('gameOver', { 
@@ -788,6 +896,7 @@ function finishGame(room, winner) {
         score: roundScore,
         players: sortedPlayers
     });
+    
     broadcastGameState(room.id);
 }
 
@@ -812,19 +921,32 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
 
 function drawCards(room, player, count) {
     for(let i=0; i<count; i++) {
-        ensureDeck(room);
+        if(room.deck.length === 0) {
+            if(room.discardPile.length > 1) {
+                const top = room.discardPile.pop();
+                room.deck = shuffle(room.discardPile);
+                room.discardPile = [top];
+            } else {
+                room.deck = room.gameMode === 'flip' ? createFlipDeck() : createClassicDeck();
+            }
+        }
         if(room.deck.length > 0) {
             player.hand.push(room.deck.pop());
         }
     }
+    player.cardCount = player.hand.length;
 }
 
 function advanceTurn(room) {
     room.turnIndex = (room.turnIndex + room.direction + room.players.length) % room.players.length;
 }
 
-function getNextPlayer(room) {
-    return room.players[(room.turnIndex + room.direction + room.players.length) % room.players.length];
+function getNextPlayerIndex(room) {
+    return (room.turnIndex + room.direction + room.players.length) % room.players.length;
+}
+
+function getNextPlayer(room) { 
+    return room.players[getNextPlayerIndex(room)]; 
 }
 
 function getPlayerRoomId(socketId) {
@@ -835,38 +957,64 @@ function getPlayerRoomId(socketId) {
 }
 
 function addLog(room, msg) {
-    io.to(room.id).emit('chatBroadcast', { sender: 'SİSTEM', msg: msg, type: 'log', time: '' });
+    io.to(room.id).emit('chatBroadcast', {
+        sender: 'SİSTEM',
+        msg: msg,
+        type: 'log',
+        time: ''
+    });
     room.logs.push(msg);
     if(room.logs.length > 6) room.logs.shift();
 }
 
-function formatCardName(c) {
-    if(c.color === 'black') {
-        if (c.value === 'wild') return 'Joker';
-        if (c.value === 'wild4') return '+4 Joker';
-        if (c.value === 'wild_draw_color') return 'Renk Çektir';
-        if (c.value === 'wild_draw2') return 'Joker +2';
-    } 
-    return `${c.color.toUpperCase()} ${c.value}`;
+function getActiveSide(card, currentSide) {
+    if (card.sides) {
+        return card.sides[currentSide] || card.sides.light;
+    }
+    return card;
+}
+
+function formatCardName(card) {
+    if(!card) return "Bilinmeyen Kart";
+    
+    if(card.color === 'black') return card.value === 'wild' ? 'Joker' : '+4 Joker';
+    if(card.color === 'dark-black') {
+        if(card.value === 'wilddrawcolor') return 'Wild Draw Color';
+        return card.value === 'wild' ? 'Joker (Karanlık)' : 'Wild Card';
+    }
+    
+    const colorMap = {
+        'red': 'Kırmızı', 'blue': 'Mavi', 'green': 'Yeşil', 'yellow': 'Sarı',
+        'pink': 'Pembe', 'teal': 'Turkuaz', 'orange': 'Turuncu', 'purple': 'Mor'
+    };
+    
+    const colorName = colorMap[card.color] || card.color;
+    
+    const valueMap = {
+        'skip': 'Engel', 'reverse': 'Yön Değiştir', 'draw2': '+2', 'draw1': '+1',
+        'draw5': '+5', 'skipall': 'Herkesi Atla', 'flip': 'Flip', 'wilddrawcolor': 'Wild Draw Color'
+    };
+    
+    const valueName = valueMap[card.value] || card.value;
+    
+    return `${colorName} ${valueName}`;
 }
 
 function broadcastGameState(roomId) {
     const room = rooms.get(roomId);
     if(!room) return;
 
+    const topCard = room.discardPile[room.discardPile.length-1];
+    
     room.players.forEach(p => {
         const socket = io.sockets.sockets.get(p.id);
         if (socket) {
-            // İstemciye sadece geçerli tarafın (light/dark) verisini veya
-            // görselleştirme için gerekli bilgiyi gönderelim.
-            // Kompleks objeyi gönderiyoruz, istemci hangisini çizeceğini currentSide'a göre bilecek.
-            
             socket.emit('roomUpdate', {
                 roomId: room.id,
                 isHost: (p.id === room.hostId),
                 gameState: room.gameState,
                 gameMode: room.gameMode,
-                currentSide: room.currentSide,
+                playerCount: room.players.length,
                 players: room.players.map(pl => ({ 
                     id: pl.id, 
                     nickname: pl.nickname, 
@@ -875,19 +1023,21 @@ function broadcastGameState(roomId) {
                     hasUno: room.unoCallers.has(pl.id),
                     totalScore: pl.totalScore || 0
                 })),
-                myHand: p.hand, // Kartın her iki tarafı da gidiyor, istemci currentSide'a göre render edecek
-                topCard: room.discardPile[room.discardPile.length-1],
+                myHand: p.hand,
+                topCard: topCard,
                 currentColor: room.currentColor,
+                currentSide: room.currentSide,
                 logs: room.logs,
                 turnOwner: room.players[room.turnIndex].nickname,
                 isMyTurn: room.players[room.turnIndex].id === p.id,
                 turnDeadline: room.turnDeadline,
                 pendingChallenge: !!room.pendingChallenge,
-                pendingDrawAction: room.pendingDrawAction && room.pendingDrawAction.playerId === p.id
+                pendingDrawAction: room.pendingDrawAction && room.pendingDrawAction.playerId === p.id,
+                pendingWildDrawColor: !!room.pendingWildDrawColor
             });
         }
     });
 }
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log('UNO Flip Server Aktif!'));
+server.listen(PORT, () => console.log('UNO Legend Server Aktif! (Classic + Flip Modları)'));
