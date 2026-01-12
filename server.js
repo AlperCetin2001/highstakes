@@ -74,7 +74,7 @@ function createFlipDeck() {
     let lightCards = [];
     let darkCards = [];
 
-    // --- LIGHT SIDE ---
+    // --- LIGHT SIDE GENERATION ---
     lightColors.forEach(color => {
         lightCards.push({ color, value: '1', type: 'number', score: 1 });
         for(let i=1; i<=9; i++) {
@@ -94,7 +94,7 @@ function createFlipDeck() {
         lightCards.push({ color: 'black', value: 'wild_draw2', type: 'wild', score: 50 });
     }
 
-    // --- DARK SIDE ---
+    // --- DARK SIDE GENERATION ---
     darkColors.forEach(color => {
         for(let i=1; i<=9; i++) {
             darkCards.push({ color, value: i.toString(), type: 'number', score: i });
@@ -310,10 +310,6 @@ io.on('connection', (socket) => {
         if (room.pendingChallenge) return;
         if (room.pendingDrawAction) return;
 
-        // Reset timer is handled, but here we pause it? No, keep it running or reset?
-        // Kural: Karar verme süresi de turun parçasıdır. Resetlemeyelim, devam etsin.
-        // Veya oyuncuya ek süre verelim mi? Basitlik için resetleyip yeniden başlatalım.
-        // Böylece düşünme payı olur.
         resetTurnTimer(room);
 
         // STACKING VARSA OTOMATİK ÇEK
@@ -350,7 +346,7 @@ io.on('connection', (socket) => {
                 message: "Oynanabilir bir kart çektin! Oynamak ister misin?" 
             });
             broadcastGameState(roomId);
-            startTurnTimer(room); // Karar için yeniden 60sn
+            startTurnTimer(room);
         } else {
             addLog(room, "Çekilen kart oynanamaz. Sıra geçiyor.");
             advanceTurn(room);
@@ -380,7 +376,6 @@ io.on('connection', (socket) => {
             const oldColor = room.currentColor;
             room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
             
-            // Çek-Oyna sonrası UNO kontrolü
             if (player.hand.length === 1 && !room.unoCallers.has(player.id)) {
                 addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
                 drawCards(room, player, 2);
@@ -419,7 +414,6 @@ io.on('connection', (socket) => {
         
         let isValid = false;
 
-        // STACKING KONTROLÜ (Sadece Flip Modunda)
         if (room.gameMode === 'flip' && room.drawStack > 0) {
             const canStack = (activeCard.value === topActive.value) || 
                              (activeCard.value === 'wild4' && topActive.value === 'wild4') ||
@@ -446,7 +440,6 @@ io.on('connection', (socket) => {
             const oldColorForChallenge = room.currentColor;
             room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
 
-            // OTOMATİK UNO KONTROLÜ
             if (player.hand.length === 1) {
                 if (!room.unoCallers.has(player.id)) {
                     addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
@@ -501,7 +494,6 @@ io.on('connection', (socket) => {
         if(!room) return;
         const player = room.players.find(p => p.id === socket.id);
         
-        // 2 kart varken (birini atacak) basabilir
         if (player.hand.length <= 2) {
             if (!room.unoCallers.has(player.id)) {
                 room.unoCallers.add(player.id);
