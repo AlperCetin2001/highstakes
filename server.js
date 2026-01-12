@@ -12,6 +12,7 @@ const io = new Server(server, {
 });
 
 const rooms = new Map();
+const TURN_DURATION = 60000; // 60 Saniye
 
 // --- YARDIMCI FONKSİYONLAR ---
 
@@ -73,7 +74,7 @@ function createFlipDeck() {
     let lightCards = [];
     let darkCards = [];
 
-    // --- LIGHT SIDE GENERATION ---
+    // --- LIGHT SIDE ---
     lightColors.forEach(color => {
         lightCards.push({ color, value: '1', type: 'number', score: 1 });
         for(let i=1; i<=9; i++) {
@@ -93,7 +94,7 @@ function createFlipDeck() {
         lightCards.push({ color: 'black', value: 'wild_draw2', type: 'wild', score: 50 });
     }
 
-    // --- DARK SIDE GENERATION ---
+    // --- DARK SIDE ---
     darkColors.forEach(color => {
         for(let i=1; i<=9; i++) {
             darkCards.push({ color, value: i.toString(), type: 'number', score: i });
@@ -309,6 +310,10 @@ io.on('connection', (socket) => {
         if (room.pendingChallenge) return;
         if (room.pendingDrawAction) return;
 
+        // Reset timer is handled, but here we pause it? No, keep it running or reset?
+        // Kural: Karar verme süresi de turun parçasıdır. Resetlemeyelim, devam etsin.
+        // Veya oyuncuya ek süre verelim mi? Basitlik için resetleyip yeniden başlatalım.
+        // Böylece düşünme payı olur.
         resetTurnTimer(room);
 
         // STACKING VARSA OTOMATİK ÇEK
@@ -345,7 +350,7 @@ io.on('connection', (socket) => {
                 message: "Oynanabilir bir kart çektin! Oynamak ister misin?" 
             });
             broadcastGameState(roomId);
-            startTurnTimer(room);
+            startTurnTimer(room); // Karar için yeniden 60sn
         } else {
             addLog(room, "Çekilen kart oynanamaz. Sıra geçiyor.");
             advanceTurn(room);
@@ -496,6 +501,7 @@ io.on('connection', (socket) => {
         if(!room) return;
         const player = room.players.find(p => p.id === socket.id);
         
+        // 2 kart varken (birini atacak) basabilir
         if (player.hand.length <= 2) {
             if (!room.unoCallers.has(player.id)) {
                 room.unoCallers.add(player.id);
@@ -739,7 +745,7 @@ function ensureDeck(room) {
 
 function startTurnTimer(room) {
     if(room.timer) clearTimeout(room.timer);
-    room.turnDeadline = Date.now() + 15000; 
+    room.turnDeadline = Date.now() + TURN_DURATION; 
     
     room.timer = setTimeout(() => {
         if(!rooms.has(room.id)) return;
@@ -759,7 +765,7 @@ function startTurnTimer(room) {
         advanceTurn(room);
         broadcastGameState(room.id);
         startTurnTimer(room);
-    }, 15000);
+    }, TURN_DURATION);
 }
 
 function resetTurnTimer(room) { if(room.timer) clearTimeout(room.timer); }
