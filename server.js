@@ -271,6 +271,7 @@ io.on('connection', (socket) => {
             p.hasUno = false;
         });
 
+        // İlk kartı aç
         let first;
         do {
             first = room.deck.pop();
@@ -310,6 +311,7 @@ io.on('connection', (socket) => {
 
         resetTurnTimer(room);
 
+        // STACKING VARSA OTOMATİK ÇEK
         if (room.drawStack > 0) {
             addLog(room, `${player.nickname} komboyu karşılayamadı ve ${room.drawStack} kart çekti!`);
             drawCards(room, player, room.drawStack);
@@ -377,6 +379,7 @@ io.on('connection', (socket) => {
             if (player.hand.length === 1 && !room.unoCallers.has(player.id)) {
                 addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
                 drawCards(room, player, 2);
+                room.unoCallers.add(player.id);
             }
             if (player.hand.length !== 1) room.unoCallers.delete(player.id);
 
