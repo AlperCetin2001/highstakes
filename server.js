@@ -328,6 +328,13 @@ io.on('connection', (socket) => {
 
         const drawnCard = room.deck.pop();
         player.hand.push(drawnCard);
+        
+        // --- DÜZELTME 1: KART ÇEKİNCE UNO RESET ---
+        if (player.hand.length > 1) {
+            room.unoCallers.delete(player.id);
+        }
+        // ------------------------------------------
+
         addLog(room, `${player.nickname} kart çekti.`);
 
         const activeSide = drawnCard.sides[room.currentSide];
@@ -373,15 +380,19 @@ io.on('connection', (socket) => {
             room.discardPile.push(card);
             
             const activeCard = card.sides[room.currentSide];
-            const oldColor = room.currentColor;
+            const oldColor = room.currentColor; // Renk değişmeden önceki hali alıyoruz
             room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
             
-            if (player.hand.length === 1 && !room.unoCallers.has(player.id)) {
-                addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
-                drawCards(room, player, 2);
-                room.unoCallers.add(player.id);
+            // --- OTOMATİK UNO KONTROLÜ ---
+            if (player.hand.length === 1) {
+                if (!room.unoCallers.has(player.id)) {
+                    addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
+                    drawCards(room, player, 2);
+                    room.unoCallers.add(player.id); // Cezayı yediği için artık güvende
+                }
+            } else {
+                room.unoCallers.delete(player.id);
             }
-            if (player.hand.length !== 1) room.unoCallers.delete(player.id);
 
             addLog(room, `${player.nickname} çektiği kartı oynadı: ${formatCardName(activeCard)}`);
             room.pendingDrawAction = null;
@@ -437,9 +448,10 @@ io.on('connection', (socket) => {
             player.hand.splice(cardIndex, 1);
             room.discardPile.push(card);
             
-            const oldColorForChallenge = room.currentColor;
+            const oldColorForChallenge = room.currentColor; // BURASI ÖNEMLİ: Meydan okuma için eski renk
             room.currentColor = (activeCard.color === 'black') ? chosenColor : activeCard.color;
 
+            // --- UNO KONTROLÜ VE RESET MANTIĞI ---
             if (player.hand.length === 1) {
                 if (!room.unoCallers.has(player.id)) {
                     addLog(room, `🚨 OTOMATİK CEZA! ${player.nickname} UNO demeyi unuttu! (+2 Kart)`);
@@ -451,6 +463,7 @@ io.on('connection', (socket) => {
             } else {
                 room.unoCallers.delete(player.id);
             }
+            // --------------------------------------
 
             addLog(room, `${player.nickname} attı: ${formatCardName(activeCard)}`);
             handleCardEffect(room, activeCard, player, oldColorForChallenge);
@@ -494,6 +507,7 @@ io.on('connection', (socket) => {
         if(!room) return;
         const player = room.players.find(p => p.id === socket.id);
         
+        // 2 kart varken basarsa, bir sonraki hamlede 1 karta düşünce güvende olur.
         if (player.hand.length <= 2) {
             if (!room.unoCallers.has(player.id)) {
                 room.unoCallers.add(player.id);
@@ -521,17 +535,23 @@ io.on('connection', (socket) => {
             room.drawStack = 0; 
             advanceTurn(room); 
         } else {
+            // --- DÜZELTME 2: DAHA SAĞLAM RENK KONTROLÜ ---
+            // Standart kural: Eğer atan kişinin elinde, YERDEKİ ÖNCEKİ RENGİN aynısı varsa blöf yapmış sayılır.
+            // oldColor: +4 atılmadan önceki yerdeki renk.
+            
             const hasColor = attacker.hand.some(c => {
                 const side = c.sides[room.currentSide];
-                return side.color === oldColor && side.color !== 'black';
+                // oldColor null ise (ilk el jokerse) blöf yapılamaz (her şeyi atabilir).
+                // Wild kartlar renk olarak sayılmaz, sadece renkli kartlar kısıtlamaya girer.
+                return oldColor && side.color === oldColor && side.color !== 'black';
             });
             
             if (hasColor) {
-                addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} blöf yapmıştı! (Ceza: 4 Kart)`);
+                addLog(room, `⚖️ YAKALANDI! ${attacker.nickname} elinde ${oldColor.toUpperCase()} varken +4 attı! (Ceza: 4 Kart)`);
                 drawCards(room, attacker, 4);
                 room.drawStack = 0;
                 broadcastGameState(roomId);
-                startTurnTimer(room);
+                startTurnTimer(room); // Sıra saldıranda kalır veya geçer kurala göre ama genelde nextPlayer oynar. Biz burada sıfırlayıp devam ediyoruz.
                 return;
             } else {
                 addLog(room, `⚖️ TEMİZ! ${attacker.nickname} dürüsttü. ${victim.nickname} 6 kart çekiyor!`);
@@ -676,6 +696,7 @@ function handleCardEffect(room, card, player, oldColorForChallenge) {
             room.drawStack += addedStack;
             addLog(room, `Kombo! Ortadaki ceza: +${room.drawStack} kart!`);
             
+            // Flip modunda wild4 genellikle yoktur ama yine de kuralı ekleyelim (Classic mod için)
             if (card.value === 'wild4') {
                 room.pendingChallenge = { attackerId: player.id, victimId: nextPlayer.id, oldColor: oldColorForChallenge };
                 io.to(nextPlayer.id).emit('challengePrompt', { attacker: player.nickname });
@@ -702,6 +723,10 @@ function handleCardEffect(room, card, player, oldColorForChallenge) {
                 if(room.deck.length === 0) break;
                 const drawn = room.deck.pop();
                 nextPlayer.hand.push(drawn);
+                
+                // Kart çekince de UNO caller silinmeli
+                if(nextPlayer.hand.length > 1) room.unoCallers.delete(nextPlayer.id);
+
                 drawnCount++;
                 if (drawn.sides[room.currentSide].color === room.currentColor) found = true;
             }
@@ -805,12 +830,17 @@ function joinRoomHandler(socket, roomId, nickname, avatar) {
     broadcastGameState(roomId);
 }
 
+// --- DÜZELTME 1 İÇİN YARDIMCI GÜNCELLEME ---
 function drawCards(room, player, count) {
     for(let i=0; i<count; i++) {
         ensureDeck(room);
         if(room.deck.length > 0) {
             player.hand.push(room.deck.pop());
         }
+    }
+    // Kart çekince el sayısı 1'i geçerse UNO durumu iptal
+    if (player.hand.length > 1) {
+        room.unoCallers.delete(player.id);
     }
 }
 
